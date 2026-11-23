@@ -1,0 +1,22 @@
+{
+  "sid": "s0004",
+  "ver": "v006",
+  "text": "執筆意図が文の隣にあるため、AI が何を考えてその文を執筆したかを確認し、自分の意図と異なる箇所を発見できます。",
+  "tags": {
+    "relation": "順接",
+    "importance": "核",
+    "role": [
+      "理由"
+    ],
+    "technique": [],
+    "place": "8. 言いたいこと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p1",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794989029298443028,
+  "written_at": 1794989029371300624,
+  "in": null
+}

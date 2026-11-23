@@ -1,0 +1,22 @@
+{
+  "sid": "s0014",
+  "ver": "v006",
+  "text": "文機能でなく文そのものに言いたいことは、何も押さずにそのままコメントの欄へ記入できます。",
+  "tags": {
+    "relation": "補足",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p3",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794989031069401607,
+  "written_at": 1794989031133370108,
+  "in": null
+}

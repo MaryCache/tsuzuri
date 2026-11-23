@@ -1,0 +1,22 @@
+{
+  "sid": "s0021",
+  "ver": "v006",
+  "text": "アイコンバーの 1 と 2 で開く要件定義書と設計書では、項目や段落を選ぶと、その項目や段落に当たる文が詳細パネルに並びます。",
+  "tags": {
+    "relation": "添加",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r001",
+  "design": "d001",
+  "para": "p5",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794952585485729975,
+  "written_at": 1794952585552478728,
+  "in": null
+}

@@ -1,0 +1,22 @@
+{
+  "sid": "s0007",
+  "ver": "v001",
+  "text": "「文章構造」の分類の上にマウスを乗せると、その分類の文がどんな性質かが出て、本文では同じ分類の文の印だけが残ります。",
+  "tags": {
+    "relation": "補足",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r001",
+  "design": "d001",
+  "para": "p2",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794937225931308102,
+  "written_at": 1794937232219992883,
+  "in": null
+}

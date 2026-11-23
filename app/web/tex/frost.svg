@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- すりガラスの細かい粒。glass-T1.png（GPT Image の見本）の面の内側で測った粒（ガウスぼかし半径4の高域で標準偏差 1.27/255・周波数はほぼ一様）に合わせる。
+       色は持たず、中間の灰を中心にした明暗だけ。CSS の面の色に overlay で重ねる。stitchTiles で継ぎ目なく敷ける -->
+  <filter id="f" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" seed="7" stitchTiles="stitch"/>
+    <feColorMatrix type="matrix" values="0 0 0 1 0  0 0 0 1 0  0 0 0 1 0  0 0 0 0 1"/>
+    <!-- 粒の強さ。0.5 を中心に明暗の幅を縮める（傾きは画面で測って見本の 1.27/255 に合わせた値） -->
+    <feComponentTransfer><feFuncR type="linear" slope=".2" intercept=".4"/><feFuncG type="linear" slope=".2" intercept=".4"/><feFuncB type="linear" slope=".2" intercept=".4"/></feComponentTransfer>
+  </filter>
+  <rect width="256" height="256" filter="url(#f)"/>
+</svg>

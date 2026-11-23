@@ -1,0 +1,22 @@
+{
+  "sid": "s0004",
+  "ver": "v005",
+  "text": "執筆意図が文の隣にあるので、AI が何を考えてその文を書いたかを読み、自分の意図とずれた所を見つけられます。",
+  "tags": {
+    "relation": "順接",
+    "importance": "核",
+    "role": [
+      "理由"
+    ],
+    "technique": [],
+    "place": "8. 言いたいこと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p1",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794963813762535768,
+  "written_at": 1794963813827488586,
+  "in": null
+}

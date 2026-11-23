@@ -1,0 +1,22 @@
+{
+  "sid": "s0023",
+  "ver": "v002",
+  "text": "まずはこの文を選んで、どんな執筆意図で書かれたかを読んでみてください。",
+  "tags": {
+    "relation": "転換",
+    "importance": "衛星",
+    "role": [
+      "主張"
+    ],
+    "technique": [],
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r001",
+  "design": "d001",
+  "para": "p5",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794942950572320785,
+  "written_at": 1794942950646878579,
+  "in": null
+}

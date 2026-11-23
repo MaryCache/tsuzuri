@@ -1,0 +1,22 @@
+{
+  "sid": "s0018",
+  "ver": "v006",
+  "text": "コメントを残したら、Claude Code に「tsuzuri のコメントを読んで直して」と依頼します。",
+  "tags": {
+    "relation": "連鎖",
+    "importance": "核",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "8. 言いたいこと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p4",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794989032132908134,
+  "written_at": 1794989032199606523,
+  "in": null
+}

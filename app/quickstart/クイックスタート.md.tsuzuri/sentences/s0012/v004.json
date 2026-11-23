@@ -1,0 +1,22 @@
+{
+  "sid": "s0012",
+  "ver": "v004",
+  "text": "読む際は、文が執筆意図を果たしているか、文機能が執筆意図に合っているかを確認してください。",
+  "tags": {
+    "relation": "連鎖",
+    "importance": "核",
+    "role": [
+      "主張"
+    ],
+    "technique": [],
+    "place": "8. 言いたいこと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p3",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794989030679249262,
+  "written_at": 1794989030743922810,
+  "in": null
+}

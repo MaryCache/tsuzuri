@@ -1,0 +1,22 @@
+{
+  "sid": "s0019",
+  "ver": "v006",
+  "text": "直った所は、サイドバーの「変更」にある「差分だけ」を押すと、直した文だけが並び、消えた字と足された字を確認できます。",
+  "tags": {
+    "relation": "連鎖",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p4",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794963939422373820,
+  "written_at": 1794963939484745948,
+  "in": null
+}

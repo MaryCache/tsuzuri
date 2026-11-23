@@ -1,0 +1,22 @@
+{
+  "sid": "s0022",
+  "ver": "v005",
+  "text": "アイコンバーのいちばん下のボタンか ? キーを押すと、キーでの操作が並ぶキーの案内が開きます。",
+  "tags": {
+    "relation": "添加",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p5",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794963835955399555,
+  "written_at": 1794963836020270685,
+  "in": null
+}

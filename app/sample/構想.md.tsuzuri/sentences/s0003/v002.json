@@ -1,0 +1,23 @@
+{
+  "sid": "s0003",
+  "ver": "v002",
+  "text": "先月の振り返りを読み返したとき、どうしてその順番で作業したのかを、誰も思い出せなかった。",
+  "tags": {
+    "relation": "補足",
+    "importance": "衛星",
+    "role": [
+      "根拠",
+      "報告"
+    ],
+    "technique": [],
+    "place": "2. 書く理由"
+  },
+  "requirements": "r001",
+  "design": null,
+  "para": null,
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1795052793575558414,
+  "written_at": 1795052793665460335,
+  "in": null
+}

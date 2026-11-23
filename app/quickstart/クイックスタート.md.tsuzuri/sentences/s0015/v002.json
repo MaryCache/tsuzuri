@@ -1,0 +1,22 @@
+{
+  "sid": "s0015",
+  "ver": "v002",
+  "text": "自分の文章を書いてもらうときは、Claude Code で「tsuzuri で書いて」と頼みます。",
+  "tags": {
+    "relation": "転換",
+    "importance": "核",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p4",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794977774460052045,
+  "written_at": 1794977774532086787,
+  "in": null
+}

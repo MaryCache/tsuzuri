@@ -1,0 +1,22 @@
+{
+  "sid": "s0006",
+  "ver": "v002",
+  "text": "本文の文の左にあるアイコンは、その文の役割（主張・理由・根拠など）を示し、左のサイドバーの「文章構造」に同じアイコンで並んでいます。",
+  "tags": {
+    "relation": "転換",
+    "importance": "核",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r001",
+  "design": "d001",
+  "para": "p2",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794942949049257449,
+  "written_at": 1794942949136949668,
+  "in": null
+}

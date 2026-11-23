@@ -1,0 +1,22 @@
+{
+  "sid": "s0001",
+  "ver": "v004",
+  "text": "この文章は tsuzuri を初めて入れた人に向けて、tsuzuri で書いたクイックスタートガイドです。",
+  "tags": {
+    "relation": "段落の始まり",
+    "importance": "核",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "3. 公開する場所と読み手"
+  },
+  "requirements": "r001",
+  "design": "d001",
+  "para": "p1",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794945359926413387,
+  "written_at": 1794945359996857480,
+  "in": null
+}

@@ -1,0 +1,22 @@
+{
+  "sid": "s0006",
+  "ver": "v001",
+  "text": "書く時間は、金曜の最後の十五分に決めてしまえばいい。",
+  "tags": {
+    "relation": "添加",
+    "importance": "核",
+    "role": [
+      "主張"
+    ],
+    "technique": [],
+    "place": "4. 言いたいこと"
+  },
+  "requirements": "r001",
+  "design": null,
+  "para": null,
+  "deviation": null,
+  "source": "human",
+  "memo_at": 1795052793373782564,
+  "written_at": 1795052793453203229,
+  "in": null
+}

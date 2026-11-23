@@ -1,0 +1,22 @@
+{
+  "sid": "s0008",
+  "ver": "v004",
+  "text": "文の右のアイコンはコメントで、ユーザーが記入したものと AI が記入したもので色と形が異なります。",
+  "tags": {
+    "relation": "添加",
+    "importance": "核",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p2",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794989029907080978,
+  "written_at": 1794989029970979128,
+  "in": null
+}

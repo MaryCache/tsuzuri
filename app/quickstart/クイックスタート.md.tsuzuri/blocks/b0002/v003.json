@@ -1,0 +1,19 @@
+{
+  "sid": "b0002",
+  "ver": "v003",
+  "text": "文を選んで執筆意図を読む",
+  "tags": {
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p3",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794977773850306777,
+  "written_at": 1794977773922750315,
+  "block": {
+    "kind": "heading",
+    "level": 2
+  }
+}

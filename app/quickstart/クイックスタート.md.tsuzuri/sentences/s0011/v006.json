@@ -1,0 +1,22 @@
+{
+  "sid": "s0011",
+  "ver": "v006",
+  "text": "その下の文機能は、役割と重要度を頭の丸いラベルで、接続・工夫・対応要件をそれに続く文で示します。",
+  "tags": {
+    "relation": "添加",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p3",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794974458343860318,
+  "written_at": 1794974458401157467,
+  "in": null
+}

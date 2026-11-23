@@ -1,0 +1,69 @@
+/* すりガラスの質感（GPT Image で精巧な見本を作らせ、SVG に起こして適用する）。
+   見本を画素で測り、粒と面の光を SVG（web/tex/）に、縁の光と接する影を box-shadow に起こした。
+   SVG は明暗だけを持ち、面の色は theme-glass.css の --g-* が持つ（外の SVG には CSS 変数が届かないため）。
+   SVG は tex.js が最初に1回だけ画素の絵に焼き、--tex-<名前> で渡す（焼く前と焼けないときは SVG を直接敷く）。
+   粒は 256px の固定の大きさで敷く。文詳細は開閉で毎フレーム幅が変わるので、縮めずに切り取らせる */
+
+body[data-theme="glass"] {
+  --frost: var(--tex-frost, url("/web/tex/frost.svg")) 0 0 / 256px 256px repeat;
+  --sheen: url("/web/tex/sheen.svg") 0 0 / 100% 100% no-repeat;
+  /* 縁: 見本では上と左の縁に約5px（カードの角丸から見て実寸の約5倍）の明るい線（L≈252）、その内側に少し明るい帯、
+     下と右の縁は少し暗い。実寸では 1px の白い縁と、内側の 3px のにじみにする */
+  --rim:
+    inset 0 1px 0 oklch(0.985 0.010 var(--light-h) / .95),
+    inset 1px 0 0 oklch(0.985 0.010 var(--light-h) / .8),
+    inset 1px 1px 3px oklch(0.985 0.010 var(--light-h) / .45),
+    inset 0 -1px 0 oklch(var(--shade-near) / .13),
+    inset -1px 0 0 oklch(var(--shade-near) / .10);
+  /* 接する影: 見本ではカードのすぐ外の地が約 10/255 暗い（幅は実寸で約6px）。広い影（--panel）の手前に足す */
+  --contact: 0 0 0 1px oklch(var(--shade-near) / .07), 0 1px 6px oklch(var(--shade-near) / .12);
+}
+
+/* すりガラスの3枚（文詳細・道具のカード・アイコンの列）。本文の紙はガラスではないので掛けない */
+body[data-theme="glass"] .detail,
+body[data-theme="glass"] .side,
+body[data-theme="glass"] .rail {
+  background-blend-mode: normal, overlay, normal;
+  box-shadow: var(--contact), var(--panel), var(--rim);
+}
+body[data-theme="glass"] .detail { background: var(--sheen), var(--frost), var(--g-detail); }
+/* 文詳細は開閉で幅が 0〜440px と変わる。面の光（斜めの明暗）を欄いっぱいに伸ばすと、幅につれて明暗の角度が回り、
+   開閉が斜めに流れて見えた。
+   光は開いたときの幅に固定し、欄が伸びてくる右上を基準に置く */
+body[data-theme="glass"] .detail { background-size: 440px 100%, 256px 256px, auto; background-position: right top, 0 0, 0 0; background-repeat: no-repeat, repeat, no-repeat; }
+/* 道具のカードは不透明のまま（後ろをぼかさない）。アイコンの列に重なる帯を透かしてぼかす形を試した。
+   カード全体をぼかすと開閉のあいだ 33ms のコマが 2割に増え（ヘッドレスの chromium で 184 中 43〜45・ぼかし無しは 225 中 1〜3）、
+   帯だけなら落ちは消えたが、帯の後ろはアイコンの列の平らな面だけで、ぼかしても見た目がほとんど変わらなかったのでやめた */
+body[data-theme="glass"] .side { background: var(--sheen), var(--frost), var(--g-side); }
+body[data-theme="glass"] .rail { background: var(--sheen), var(--frost), var(--g-rail); }
+
+/* 地（ground-T2.png から）。光の入る左上は光源の色相（85）をわずかに帯び、右下の暗い所は紫側（258）へ回す（light-and-shadow.md P3 (a)）。見本は左上 L .966 → 中央 .908 → 右下 .845、彩度は .009 → .025 → .035 と右下ほど増え、色相は約244。
+   見本の中央は今の地（.881）より明るく、そのままだと文詳細のカード（.918）と地が溶けるので、並びと彩度の増え方だけ写し、中央を .881 に下げた */
+body[data-theme="glass"] {
+  background:
+    var(--tex-ground, url("/web/tex/ground.svg")) 0 0 / 1024px 1024px repeat,
+    radial-gradient(760px 560px at 0% 0%, oklch(0.955 0.03 var(--light-h) / .7), transparent 70%),
+    radial-gradient(1000px 700px at 0% 0%, oklch(0.94 0.009 244 / .9), transparent 65%),
+    linear-gradient(150deg, oklch(0.915 0.018 244), oklch(0.881 0.025 246) 50%, oklch(0.818 0.038 258));
+  background-blend-mode: overlay, normal, normal, normal;
+  background-attachment: fixed;
+}
+
+/* 本文の紙（paper-T3.png から）。見本は細かい面（高域の標準偏差 1.03/255）に、向きのばらばらな短く曲がった繊維が散る。
+   明るさは左上が少し明るく右下へ下がるが、本文の下なので見本の幅（約16/255）の半分以下に抑えた（texture.md 4章「強すぎに注意」・目が滑るのを避ける）。
+   質感は紙そのものでなく、幅の変わらない1枚の層（::before・幅 2400px）に載せる。紙に直接敷くと、文詳細の開閉で紙の幅が毎フレーム変わり、
+   模様のある大きな面を描き直して1フレーム 33〜50ms かかった（平らな色なら 16.8ms・層に分けると 16.8ms・実測）。
+   層は紙の幅に付いてこないので、光は左上からの px の大きさで置き、右下を暗くするのはやめた（見本の .035 ぶん）。
+   高さは本文の長さに合わせて tex.js が --paper-h に入れる */
+/* 横は層の 2400px がはみ出すので切る（紙は縦にだけスクロールする） */
+body[data-theme="glass"] .paper { background: var(--g-paper); overflow-x: hidden; }
+body[data-theme="glass"] .paper::before {
+  content: ""; position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none;
+  width: 2400px; height: var(--paper-h, 100%);
+  will-change: transform;
+  background:
+    radial-gradient(900px 700px at 0 0, oklch(0.975 0.02 var(--light-h) / .6), transparent 70%),
+    var(--tex-paper, url("/web/tex/paper.svg")) 0 0 / 512px 512px repeat,
+    var(--g-paper);
+  background-blend-mode: normal, overlay, normal;
+}

@@ -1,0 +1,22 @@
+{
+  "sid": "s0013",
+  "ver": "v006",
+  "text": "違うと思った文機能があれば、その中で点線の下線が付いた語（役割・接続・重要度など）を押してから、どう違うかを書いて Ctrl+Enter で残してください。",
+  "tags": {
+    "relation": "添加",
+    "importance": "核",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p3",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794965400595001622,
+  "written_at": 1794965400659664635,
+  "in": null
+}

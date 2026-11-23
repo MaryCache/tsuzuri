@@ -1,0 +1,22 @@
+{
+  "sid": "s0011",
+  "ver": "v005",
+  "text": "その下の文機能は、役割・接続・重要度などを続けて読める文で示します。",
+  "tags": {
+    "relation": "添加",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p3",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794965400372269052,
+  "written_at": 1794965400433618686,
+  "in": null
+}

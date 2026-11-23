@@ -1,0 +1,22 @@
+{
+  "sid": "s0004",
+  "ver": "v002",
+  "text": "執筆意図が文の隣に残っていると、読んで引っかかった文について、文が執筆意図からずれたのか、執筆意図そのものがずれていたのかを分けて確認できます。",
+  "tags": {
+    "relation": "順接",
+    "importance": "核",
+    "role": [
+      "理由"
+    ],
+    "technique": [],
+    "place": "8. 言いたいこと"
+  },
+  "requirements": "r001",
+  "design": "d001",
+  "para": "p1",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794942948888140045,
+  "written_at": 1794942948962610724,
+  "in": null
+}

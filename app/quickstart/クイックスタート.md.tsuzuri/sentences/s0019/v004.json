@@ -1,0 +1,22 @@
+{
+  "sid": "s0019",
+  "ver": "v004",
+  "text": "直った所はサイドバーの「変更」で「差分だけ」を押すと、直す前の文と直したあとの文を並べて確認できます。",
+  "tags": {
+    "relation": "連鎖",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r001",
+  "design": "d001",
+  "para": "p4",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794952585328713157,
+  "written_at": 1794952585391372325,
+  "in": null
+}

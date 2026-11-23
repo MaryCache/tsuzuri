@@ -1,0 +1,788 @@
+/* トンマナ第3版「すりガラス」。手本は ../sketch/G1-glass.png（GPT Image で描いた画面の絵）。
+   色は G1 の画素を測った値（コメントの #）。参照は ../research/ref-mist-2.png。
+   動きはバネ（物理演算のような手触りにするため）。曲線は app.js が spring(280, 28) から計算して --spring に入れる。
+   body[data-theme="glass"] のときだけ効く */
+.rail { display: none; }
+body[data-theme="glass"] {
+  /* 色は OKLCH で持つ（重ねる効果も含めて色を管理するため）。
+     面は色相 240・彩度 .012〜.020 の1本の系統に、明るさの段を並べた。値は G1 の画素（#）を OKLCH に直したもの */
+  --g-h: 240;
+  /* 字の大きさは4段、角丸は4段と丸いカード（字の大きさと角丸を寄せた）。
+     前は字が 10〜19px の10段、角丸が 2〜20px の12種に散っていた。字: 補助と件数 11・道具と詳細の字 13・欄の見出しと役割 15・本文 18。
+     角丸: 小さなカード 6・ボタンと行 10・カードの中のカード 14・カード 20。カードの中のカードは、カードの角丸 20 から内側の余白ぶん小さくして同心に見せる */
+  --fs-1: 11px; --fs-2: 13px; --fs-3: 15px; --fs-4: 18px;
+  --r-1: 6px; --r-2: 10px; --r-3: 14px; --r-4: 20px; --r-pill: 999px;
+  --g-bg: oklch(0.881 0.019 var(--g-h));       /* 地 #CDDAE3 */
+  --g-detail: oklch(0.918 0.020 243);          /* 文詳細のカード #D9E6F1 */
+  --g-side: oklch(0.923 0.019 236);            /* 道具のカード #DAE8F1 */
+  --g-row: oklch(0.947 0.013 241);             /* カードの中の行 #E6EFF6 */
+  --g-card: oklch(0.957 0.012 var(--g-h));     /* 文詳細の中のカード #EAF2F8 */
+  --g-rail: oklch(0.972 0.012 var(--g-h));     /* アイコンの列 #EFF7FD */
+  --g-paper: oklch(0.981 0.006 255);           /* 紙 #F6F9FD */
+  --navy: oklch(0.292 0.044 267);              /* 濃紺 #222B42 */
+  --chip: oklch(0.906 0.023 233);              /* 件数のカード #D2E3ED */
+  --ink: oklch(0.271 0.029 259);
+  --ink-sub: oklch(0.522 0.026 248);
+  --icon: oklch(0.322 0.029 257);
+  --line: oklch(0.985 0.010 var(--light-h) / .7);
+  --selected: oklch(0.975 0.008 var(--g-h));
+  --accent: var(--navy);
+  --focus: var(--navy);
+  /* 役割の印。G1 の色は明るさ 0.69〜0.77・彩度 0.054〜0.092 とばらついていた。明るさ 0.72・彩度 0.07 にそろえ、色相だけで分ける（どれも同じ重さに見える） */
+  --mark-l: 0.72; --mark-c: 0.07;
+  /* 赤っぽい色相（330〜40 あたり）は使わない（赤っぽい色は紙の上で浮くため）。
+     意見（主張・評価・理由）は黄土から緑の暖かめ、事実（根拠・解説・報告）は青緑から青の寒めに、色相を40ずつ離して並べる（35 だと評価と理由が見分けにくかった）。
+     前は主張が 14（赤）・理由が 300（赤紫）・報告が 272（地に混ぜるとピンクに寄った） */
+  --role-claim: oklch(var(--mark-l) var(--mark-c) 60);
+  --role-evaluation: oklch(var(--mark-l) var(--mark-c) 100);
+  --role-reason: oklch(var(--mark-l) var(--mark-c) 140);
+  --role-evidence: oklch(var(--mark-l) var(--mark-c) 185);
+  --role-explanation: oklch(var(--mark-l) var(--mark-c) 225);
+  --role-report: oklch(var(--mark-l) var(--mark-c) 265);
+  /* 役割が語彙の外の文（小説の役割など）の左の印は無彩寄り */
+  --hl-human: oklch(var(--mark-l) 0.02 248);
+  /* 要件網羅の抜けのカードの色（黄土） */
+  --hl-missing: oklch(var(--mark-l) var(--mark-c) 81);
+  /* コメントの右の印: ユーザーは琥珀の色相（75）、AI は青緑の色相（200）。暖色と寒色で出どころを分ける。
+     錆（30）は赤っぽいのでやめた。明るさと彩度はほかの印と同じ */
+  --hl-user: oklch(var(--mark-l) var(--mark-c) 75);
+  --hl-ai: oklch(var(--mark-l) var(--mark-c) 200);
+  /* 解決済みのコメントしか無い文の印と線。ユーザー・AI と同じ明るさで彩度だけ 0 にする（色の印から一段引いて見せる） */
+  --hl-done: oklch(var(--mark-l) 0 0);
+  /* 重要度の印: 核は差し色の濃紺、衛星は同じ色相で明るく彩度を落とした青灰。役割の色と並ぶので、色相ではなく濃さで分ける */
+  --imp-core: var(--navy);
+  --imp-sub: oklch(0.66 0.035 255);
+  /* 重ねの色は下の色と OKLCH で混ぜて作る（合成）。選んだカードは紙に役割の色を 10% 吸わせ、ホバーのカードは紙と地のあいだ */
+  --sel-card: color-mix(in oklch, var(--g-paper) 90%, var(--sel-k, var(--g-paper)) 10%);
+  --hover-card: color-mix(in oklch, var(--g-paper) 55%, var(--g-bg) 45%);
+  --edge: inset 0 0 0 1px oklch(0.985 0.010 var(--light-h) / .75);
+  /* 影は黒や灰で作らず、地（色相 240）から紫側へ回した色相 265 の、明るさを残して彩度を持たせた色で付ける。
+     暗さは不透明度で保ち、くすまずに透き通った影にする（黒い影はくすむので、色相を青〜紫側に寄せて暗さを保つと、くすまず透き通った影になる）。
+     ← design-library の knowledge/color/gradients-shading.md 3章「影を黒で作らない・低彩度の紺〜紫」、2.5章「影は明度でなく色相で付ける」 */
+  --shade-h: 265;
+  /* 光と影の色（design-library の knowledge/color/light-and-shadow.md）。
+     P1 光を純白にしない: 白い縁・ハイライト・ホバーの白は、光源の色相（黄 85）をわずかに帯びた白にする。
+     P5 (a) 面は C の低い色なので、影はカードの縁に近いほど C を上げて紫側（275）へ回し、遠くの広い影は C を下げて地の色相（252）へ寄せる */
+  /* 光の白は sRGB の中に収める。0.995 0.010 は赤が 1 を超え、重ねたところに青緑の点が出た */
+  --light-h: 85;
+  --light: oklch(0.985 0.010 var(--light-h));
+  --shade-near: 0.46 0.13 275;
+  --shade-far: 0.52 0.07 252;
+  --lift: 0 1px 2px oklch(var(--shade-near) / .13), 0 8px 22px oklch(var(--shade-far) / .15);
+  --panel: 0 1px 2px oklch(var(--shade-near) / .10), 0 14px 36px oklch(var(--shade-far) / .13);
+  --font-ui: "IBM Plex Sans JP", sans-serif;
+  grid-template-columns: 64px 224px 1fr; gap: 12px; padding: 0;
+  background: radial-gradient(900px 600px at 0% 0%, oklch(0.93 0.012 var(--g-h)), transparent 60%), linear-gradient(170deg, oklch(0.9 0.016 var(--g-h)), var(--g-bg) 55%, oklch(0.84 0.024 var(--g-h)));
+  font-family: var(--font-ui); color: var(--ink);
+}
+body[data-theme="glass"] .ic { color: var(--icon); }
+
+/* アイコンの列: 白い細い列・いまの画面は濃紺の角丸の四角 */
+body[data-theme="glass"] .rail { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 0; background: var(--g-rail); border-radius: var(--r-4); box-shadow: var(--panel), var(--edge); }
+body[data-theme="glass"] .rail button { width: 44px; height: 44px; border: 0; border-radius: var(--r-3); background: transparent; display: grid; place-items: center; cursor: pointer; transition: background-color .2s, transform .45s var(--spring); }
+body[data-theme="glass"] .rail button .ic { width: 22px; height: 22px; }
+body[data-theme="glass"] .rail button:hover { background: oklch(0.93 0.022 255); transform: translateY(-1px); }
+body[data-theme="glass"] .rail button[aria-current="true"] { background: var(--navy); box-shadow: 0 6px 14px oklch(0.42 0.1 var(--shade-h) / .3); }
+body[data-theme="glass"] .rail button[aria-current="true"] .ic { color: var(--light); }
+body[data-theme="glass"] .rail .sp { flex: 1; }
+
+/* 道具のカード */
+body[data-theme="glass"] .side { background: var(--g-side); border-radius: var(--r-4); box-shadow: var(--panel), var(--edge); padding: 20px 14px; gap: 18px; color: var(--ink-sub); }
+body[data-theme="glass"] .brand { border: 0; padding: 0 6px; }
+body[data-theme="glass"] .brand .mark { display: none; }
+/* 名前はロゴの組（吹き出し＋文字）で出す。高さ 43px＝幅 188px で、右端を下のカードの見えている右端（紙の下にもぐる手前）から 6px 内にそろえる
+   （24px・30px・38px は小さく、38px は右が余った） */
+body[data-theme="glass"] .brand .logo { display: block; height: 43px; width: auto; }
+/* ロゴを道具のカードのガラスに沈める（後ろのガラスがその形に削れて沈み込んで見えるようにする。2案を並べて選んだ）。
+   影は寒色の紫側 275、光は暖色の白（design-library の knowledge/color/light-and-shadow.md 2章「UI の影・浮き」）。フィルターは index.html の #sink */
+body[data-theme="glass"] .brand .logo { filter: url(#sink); }
+body[data-theme="glass"] .doc { background: transparent; padding: 0 6px; }
+/* 文書の名前は欄の見出しより一段大きく（見出しとロゴを大きくして見つけやすくする） */
+body[data-theme="glass"] .doc h1 { font-family: var(--font-ui); font-size: var(--fs-3); font-weight: 700; color: var(--ink); }
+body[data-theme="glass"] .doc .path { font-size: var(--fs-1); color: var(--ink-sub); }
+body[data-theme="glass"] .hbtn, body[data-theme="glass"] .label { font-family: var(--font-ui); font-weight: 600; font-size: var(--fs-2); color: var(--ink); letter-spacing: .02em; padding: 2px 6px; }
+body[data-theme="glass"] .hbtn .dot { display: none; }
+body[data-theme="glass"] .hbtn .ic, body[data-theme="glass"] .label .ic { display: none; }
+body[data-theme="glass"] .sec.off .hbtn { color: var(--ink-sub); }
+body[data-theme="glass"] .legend { background: var(--g-row); border-radius: var(--r-3); padding: 4px; gap: 0; box-shadow: var(--edge); }
+body[data-theme="glass"] .legend .grp { display: none; }
+body[data-theme="glass"] .key { border-radius: var(--r-2); padding: 7px 10px; transition: background-color .2s, transform .45s var(--spring); }
+body[data-theme="glass"] .key:hover { background: oklch(0.985 0.010 var(--light-h) / .6); transform: translateX(2px); }
+body[data-theme="glass"] .key .w { background: transparent; color: var(--ink); padding: 0; font-size: var(--fs-2); display: flex; align-items: center; gap: 10px; }
+body[data-theme="glass"] .key .w::before { content: ""; width: 3px; height: 14px; border-radius: 2px; background: var(--k); }
+body[data-theme="glass"] .sec.off .key .w { color: var(--ink-sub); box-shadow: none; }
+body[data-theme="glass"] .sec.off .legend { opacity: .7; }
+body[data-theme="glass"] .key .n, body[data-theme="glass"] .nbtn .n { min-width: 22px; text-align: center; padding: 0 6px; border-radius: var(--r-1); background: var(--chip); color: var(--ink); font-size: var(--fs-1); font-weight: 600; line-height: 20px; }
+body[data-theme="glass"] .n:empty { display: none; }
+/* 段落目次: 行の面は li が持ち、今の段落の白いカードは1枚（.toc-glide）を行の上で滑らせる（motion.js の tocGlide）。
+   カードは行の面より上・ボタンの字より下に置く（li の面 → カード → 位置を持つボタンの字の順に重なる） */
+body[data-theme="glass"] .toc { gap: 6px; position: relative; }
+body[data-theme="glass"] .toc li { background: var(--g-row); border-radius: var(--r-3); box-shadow: var(--edge); transition: background-color .2s; }
+body[data-theme="glass"] .toc li:hover { background: var(--light); }
+body[data-theme="glass"] .toc button { display: flex; align-items: center; gap: 10px; background: transparent; border-radius: var(--r-3); position: relative; z-index: 1; padding: 8px 10px; color: var(--ink); font-size: var(--fs-2); transition: background-color .2s, transform .45s var(--spring); }
+body[data-theme="glass"] .toc button::after { content: "›"; margin-left: auto; color: var(--ink-sub); font-size: var(--fs-3); }
+body[data-theme="glass"] .toc .no { flex: none; width: 20px; height: 20px; display: grid; place-items: center; border-radius: var(--r-1); background: var(--light); font-size: var(--fs-1); font-weight: 600; }
+body[data-theme="glass"] .toc button:hover { transform: translateX(2px); }
+body[data-theme="glass"] .toc-glide { position: absolute; left: 0; top: 0; z-index: 0; border-radius: var(--r-3); background: var(--light); box-shadow: var(--lift), var(--edge); pointer-events: none; opacity: 0; will-change: transform, height, opacity; }
+body[data-theme="glass"] .nav { display: none; }
+
+/* 紙 */
+body[data-theme="glass"] .desk { padding: 0; overflow: hidden; }
+body[data-theme="glass"] .set { position: relative; height: 100%; gap: 12px; justify-content: stretch; }
+body[data-theme="glass"] .paper { flex: 1; width: auto; max-width: none; height: 100%; min-height: 0; overflow-y: auto; background: var(--g-paper); border-radius: var(--r-4); box-shadow: var(--panel), var(--edge); padding: 64px 56px 120px; }
+body[data-theme="glass"] .grain { display: none; }
+body[data-theme="glass"] .text { max-width: 760px; margin: 0 auto; font-family: var(--font-ui); font-size: var(--fs-4); line-height: 1.9; letter-spacing: .02em; color: var(--ink); }
+body[data-theme="glass"][data-read="serif"] .text { font-family: var(--font-body); font-size: var(--fs-4); }
+body[data-theme="glass"] .para { margin-bottom: 40px; }
+/* 文: 左の印は文章構造、右の印は注記（両方を同時に出せる）。
+   選んだカードとホバーのカードは文の後ろを滑って移る1枚ずつのカード（motion.js が位置をバネで動かす） */
+body[data-theme="glass"] .s { position: relative; z-index: 1; margin: 0 -14px 6px; padding: 7px 26px; border-radius: var(--r-3); background: transparent !important; outline: 0 !important; }
+body[data-theme="glass"] .s .in { background-image: none !important; }
+body[data-theme="glass"] .s::before, body[data-theme="glass"] .s::after { content: ""; position: absolute; top: 13px; bottom: 13px; width: 4px; border-radius: 2px; background: transparent; transition: background-color .25s; }
+body[data-theme="glass"] .s::before { left: 10px; }
+body[data-theme="glass"] .s::after { right: 10px; }
+body[data-theme="glass"][data-struct="on"] .s::before { background: var(--k); }
+body[data-theme="glass"][data-note="on"] .s::after { background: var(--hlr, transparent); }
+body[data-theme="glass"] .text { position: relative; z-index: 1; }
+body[data-theme="glass"] .glide { position: absolute; z-index: 0; left: 0; top: 0; border-radius: var(--r-3); pointer-events: none; will-change: transform, width, height; }
+/* 選んだ文のカードは、ほかのカードと同じすりガラス（面の光・粒・縁の光）にする。斜めの線（--hatch）はやめた（他と合わせてガラス風にするため）。
+   粒と光は texture.css の --frost・--sheen・--rim。面の色は役割の色を1割混ぜた --sel-card のまま */
+/* カードは文から文へ滑るあいだ毎フレーム大きさが変わる。質感をカードそのものに敷くと毎回描き直して 1フレーム 33ms かかった（実測）。
+   そこで質感は大きさの変わらない層（::before）に載せてカードの角丸で切り抜き、縁の光はカードの大きさに合わせる層（::after）に分けた */
+body[data-theme="glass"] .glide.sel { background: var(--sel-card); overflow: hidden; box-shadow: var(--lift); }
+body[data-theme="glass"] .glide.sel::before { content: ""; position: absolute; left: 0; top: 0; width: 1400px; height: 600px; will-change: transform;
+  background: radial-gradient(520px 180px at 0 0, oklch(0.985 0.010 var(--light-h) / .35), transparent 70%), var(--frost), var(--sel-card); background-blend-mode: normal, overlay, normal; }
+body[data-theme="glass"] .glide.sel::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: var(--rim); pointer-events: none; }
+body[data-theme="glass"] .glide.hov { background: var(--hover-card); opacity: 0; }
+.glide { display: none; }
+body[data-theme="glass"] .glide { display: block; }
+
+/* ADR-0004 のブロックには文機能の印を付けず、記事の形と控えめなガラスの面で種類を伝える。 */
+body[data-theme="glass"] .blk::before, body[data-theme="glass"] .blk::after { display: none; }
+body[data-theme="glass"] .blk { margin-bottom: 24px; }
+body[data-theme="glass"] .blk:focus-visible, body[data-theme="glass"] .blk-container .s:focus-visible { outline: 2px solid var(--navy) !important; outline-offset: 2px; }
+body[data-theme="glass"] .blk-heading { font-family: inherit; font-weight: 700; line-height: 1.5; margin-top: 28px; margin-bottom: 16px; }
+body[data-theme="glass"] h2.blk-heading { font-size: calc(var(--fs-4) * 1.5); }
+body[data-theme="glass"] h2.blk-heading.blk-h1 { font-size: calc(var(--fs-4) * 1.9); margin-top: 0; }
+body[data-theme="glass"] h3.blk-heading { font-size: calc(var(--fs-4) * 1.25); }
+body[data-theme="glass"] h4.blk-heading { font-size: var(--fs-4); }
+body[data-theme="glass"] .blk-label { display: block; margin-bottom: 6px; font-family: var(--font-ui); font-size: var(--fs-1); font-weight: 600; line-height: 1.7; color: var(--ink-sub); }
+body[data-theme="glass"] .blk pre { margin: 0; padding: 14px 16px; overflow-x: auto; border-radius: var(--r-2); background: oklch(0.985 0.010 var(--light-h) / .45); box-shadow: var(--edge);
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: var(--fs-2); line-height: 1.8; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; }
+/* 長い行は折り返す。読むためのアプリで、横送りのバーは細く薄いので、行が右端で切れたように見えた（人の文の Issue の再現コード） */
+body[data-theme="glass"] .blk code { font: inherit; }
+/* ADR-0004 の入れ物は選択対象を見出し行と中の文に分ける。位置の基準を増やさず、既存の glideBox がどちらも追えるようにする。 */
+body[data-theme="glass"] .blk-container { margin: 0 0 28px; padding: 12px 34px; border-radius: var(--r-3); background: oklch(0.985 0.010 var(--light-h) / .45); box-shadow: var(--edge); }
+/* 入れ物の頭の行（種類のラベル）は、ラベルの大きさだけの小さな行にする。箱の幅いっぱいに広げると、乗せたときと選んだときのカードが箱の中に白い帯として出た */
+body[data-theme="glass"] .blk-container > .s.blk { display: inline-block; margin: 0 0 4px -10px; padding: 2px 10px; }
+body[data-theme="glass"] .blk-container .blk-label { margin-bottom: 0; font-size: var(--fs-2); }
+/* 箇条書きの番号と点は、本文の列の頭に置き、2行目以降はその幅だけぶら下げてそろえる。役割の印（.s の左 7px）は段落の文と同じ縦の列に残す。
+   前は点を出さずに役割の印を項目の頭にし、番号は印の左の外に置いていた。番号が印に隠れ、出しても本文の列の外にはみ出して美しくなかった。
+   点は全角の「・」だと本文との間が空きすぎたので「•」にし、字下げも番号より詰める */
+body[data-theme="glass"] .blk-container > :is(ul, ol) { margin: 0; padding-left: 0; list-style: none; counter-reset: item; }
+body[data-theme="glass"] .blk-container > :is(ol, ul) > li { position: relative; }
+body[data-theme="glass"] .blk-container > ol > li { counter-increment: item; }
+body[data-theme="glass"] .blk-container > ol > li > .s { padding-left: calc(32px + 1.5em); }
+body[data-theme="glass"] .blk-container > ul > li > .s { padding-left: calc(32px + 1em); }
+body[data-theme="glass"] .blk-container > :is(ol, ul) > li::before { position: absolute; top: 7px; z-index: 2; font: inherit; line-height: inherit; color: var(--ink-sub); pointer-events: none; }
+body[data-theme="glass"] .blk-container > ol > li::before { content: counter(item) "."; left: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+body[data-theme="glass"] .blk-container > ul > li::before { content: "•"; left: 13px; }
+/* 入れ物の面は紙とほとんど同じ色で、どこまでが箱か分からなかった。注記の箱は種類ごとに色相を変えた淡い面にし、箇条書きは面を敷かない（記事の箇条書きに箱は無い）。
+   色は面に薄く広げず、低い彩度に留めて濁りを避ける（light-and-shadow.md 2章「補色に近いほど濁る」） */
+body[data-theme="glass"] .blk-container.blk-note { background: oklch(0.955 0.022 240 / .75); }
+body[data-theme="glass"] .blk-container.blk-note-warn { background: oklch(0.965 0.030 85 / .75); }
+body[data-theme="glass"] .blk-container.blk-note-alert { background: oklch(0.955 0.028 25 / .75); }
+body[data-theme="glass"] .blk-container.blk-quote { background: transparent; box-shadow: inset 3px 0 0 oklch(0.80 0.02 250); border-radius: 0; padding-left: 22px; }
+body[data-theme="glass"] .blk-container.blk-list { background: transparent; box-shadow: none; padding: 4px 0; }
+/* 表は記事と同じく罫線の表にする。前は Markdown の文字のまま pre に出ていた。
+   幅の広い表は箱の中で横に送る。線は引用の箱と同じ淡い線の系統 */
+body[data-theme="glass"] .blk-table { overflow-x: auto; }
+/* 画像のブロック。本文の幅に収め、縦横の比は保つ。外部の画像は読み込まず、URL を小さく出す */
+body[data-theme="glass"] .blk-img { margin: 0; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+body[data-theme="glass"] .blk-img img { display: block; max-width: 100%; height: auto; }
+body[data-theme="glass"] .blk-img .img-ext { margin: 0; font-size: var(--fs-1); color: var(--ink-sub); overflow-wrap: anywhere; }
+body[data-theme="glass"] .md-table { border-collapse: collapse; font-size: var(--fs-2); line-height: 1.7; }
+body[data-theme="glass"] .md-table :is(th, td) { padding: 6px 14px; border-bottom: 1px solid oklch(0.88 0.012 250); }
+body[data-theme="glass"] .md-table th { font-weight: 600; border-bottom-color: oklch(0.80 0.02 250); white-space: nowrap; }
+/* 脚注は本文より一段小さく、面を敷かずに上の細い線だけで本文と分ける。呼ぶ文の段落のすぐ下に寄せる（記事の書き出しでは末尾に並ぶ注） */
+body[data-theme="glass"] .blk-container.blk-footnote { background: transparent; box-shadow: inset 0 1px 0 oklch(0.85 0.015 250); border-radius: 0; padding: 8px 0 4px 22px; font-size: var(--fs-2); margin-top: -12px; }
+
+/* 文詳細のカード */
+body[data-theme="glass"] .detail { position: relative; top: auto; width: 440px; height: 100%; max-height: none; overflow-y: auto; background: var(--g-detail); border-radius: var(--r-4); box-shadow: var(--panel), var(--edge); padding: 18px 16px 28px; gap: 16px; }
+body[data-theme="glass"] .bar h2, body[data-theme="glass"] .k { font-family: var(--font-ui); font-weight: 600; letter-spacing: .01em; color: var(--ink); }
+body[data-theme="glass"] .bar h2 { font-size: var(--fs-3); }
+body[data-theme="glass"] .bar h2 .ic { display: none; }
+body[data-theme="glass"] .bar .where { font-size: var(--fs-1); color: var(--ink-sub); }
+body[data-theme="glass"] .k { font-size: var(--fs-2); margin: 0 4px 8px; }
+body[data-theme="glass"] .k .ic { display: none; }
+body[data-theme="glass"] .memo, body[data-theme="glass"] .none { background: var(--g-card); border-radius: var(--r-3); padding: 12px 14px; box-shadow: var(--edge); font-size: var(--fs-2); line-height: 1.8; }
+body[data-theme="glass"] .dev { background: var(--g-card); border-radius: var(--r-3); box-shadow: var(--edge); font-size: var(--fs-2); }
+body[data-theme="glass"] .dev .k { margin: 0 0 4px; font-size: var(--fs-2); }
+/* 文機能: 役割を見出しに、残りを2文の説明にする（app.js の funcProse）。項目は押せて、押すとその項目へ「違う」と書き込む先になる */
+body[data-theme="glass"] .func-role { margin: 0 4px 8px; }
+/* 役割は、白いガラスのカードに役割の色の丸を添える（地に色を混ぜると赤っぽく浮いたのでやめた）。左の線はやめた（角丸のカードに片側の線を付けない） */
+body[data-theme="glass"] .func-role .clause.role { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-3); font-weight: 600; color: var(--ink); padding: 4px 12px 4px 10px; border-radius: var(--r-pill); border-bottom: 0;
+  background: oklch(0.985 0.010 var(--light-h) / .72); box-shadow: var(--rim); }
+body[data-theme="glass"] .func-role .clause.role::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--k); }
+body[data-theme="glass"] .func-role .clause.role[aria-pressed="true"] { color: var(--navy); box-shadow: var(--rim), 0 0 0 1.5px var(--navy); }
+body[data-theme="glass"] .func { background: var(--g-card); border-radius: var(--r-3); padding: 12px 14px; box-shadow: var(--edge); font-size: var(--fs-2); line-height: 2; color: var(--ink); margin: 0; }
+/* 項目は字のまま読ませ、押せることは点線の下線と、触れたときの淡い面で伝える */
+body[data-theme="glass"] .clause { font: inherit; color: inherit; background: none; border: 0; padding: 0 1px; margin: 0; border-radius: var(--r-1); cursor: pointer; text-align: left;
+  border-bottom: 1px dotted oklch(0.55 0.04 var(--g-h) / .55); transition: background-color .2s, color .2s; }
+body[data-theme="glass"] .clause:hover { background: oklch(0.985 0.010 var(--light-h) / .75); }
+body[data-theme="glass"] .clause[aria-pressed="true"] { background: oklch(0.29 0.044 267 / .1); color: var(--navy); border-bottom: 1.5px solid var(--navy); }
+body[data-theme="glass"] .clause:focus-visible { outline: 2px solid var(--navy); outline-offset: 1px; }
+body[data-theme="glass"] .ibtn { border-radius: var(--r-2); background: oklch(0.985 0.010 var(--light-h) / .7); box-shadow: var(--edge); transition: background-color .2s, transform .45s var(--spring); }
+body[data-theme="glass"] .ibtn:hover { transform: translateY(-1px); background: var(--light); }
+body[data-theme="glass"] .ibtn:active { transform: scale(.94); }
+body[data-theme="glass"] .ibtn .tip { background: var(--navy); }
+body[data-theme="glass"] .cm, body[data-theme="glass"] .list button { background: var(--g-card); border: 0; border-radius: var(--r-3); box-shadow: var(--edge); font-size: var(--fs-2); }
+body[data-theme="glass"] .cm .to { color: var(--navy); font-weight: 600; }
+body[data-theme="glass"] .old { background: var(--chip); border-radius: var(--r-2); }
+body[data-theme="glass"] .req { background: var(--g-card); border-radius: var(--r-3); white-space: normal; }
+/* 参照要件の md の表示（app.js の mdLite が見出し・箇条書き・段落にする） */
+body[data-theme="glass"] .md { font-size: var(--fs-2); line-height: 1.8; color: var(--ink); }
+body[data-theme="glass"] .md > :first-child { margin-top: 0; }
+body[data-theme="glass"] .md > :last-child { margin-bottom: 0; }
+body[data-theme="glass"] .md p { margin: 0 0 8px; }
+body[data-theme="glass"] .md .md-h1, body[data-theme="glass"] .md .md-h2 { font-size: var(--fs-2); font-weight: 700; margin: 4px 0 8px; }
+body[data-theme="glass"] .md .md-h3, body[data-theme="glass"] .md .md-h4 { font-size: var(--fs-2); font-weight: 700; margin: 4px 0 6px; }
+body[data-theme="glass"] .md ul, body[data-theme="glass"] .md ol { margin: 0 0 8px; padding-left: 1.3em; }
+body[data-theme="glass"] .md li { margin: 2px 0; }
+body[data-theme="glass"] .md li::marker { color: var(--ink-sub); }
+body[data-theme="glass"] .md code { font-size: var(--fs-1); padding: 1px 4px; border-radius: var(--r-1); background: oklch(0.985 0.010 var(--light-h) / .7); }
+/* 書込の欄は G1 の1行のカード: 明るい面・Ctrl ↵ のキーのカード・濃紺の「残す」 */
+body[data-theme="glass"] .form { background: var(--g-card); border-radius: var(--r-3); padding: 10px; box-shadow: var(--edge); }
+body[data-theme="glass"] .form label { margin: 2px 4px 6px; }
+body[data-theme="glass"] .form textarea { resize: none; min-height: 64px; border: 0; border-radius: var(--r-3); background: #F6FAFD; box-shadow: inset 0 1px 2px oklch(0.5 0.1 var(--shade-h) / .08); font-size: var(--fs-2); }
+body[data-theme="glass"] .form textarea:focus { outline: 2px solid var(--navy); outline-offset: 0; }
+body[data-theme="glass"] .form .acts { margin-top: 8px; }
+body[data-theme="glass"] .form .acts kbd { display: inline-block; padding: 0 6px; margin: 0 2px; border-radius: var(--r-1); background: var(--chip); color: var(--ink); font-family: var(--font-ui); font-size: var(--fs-1); font-weight: 600; line-height: 1.7; }
+body[data-theme="glass"] .send { background: var(--navy); color: var(--light); border-radius: var(--r-2); padding: 7px 18px; transition: transform .45s var(--spring), box-shadow .2s; box-shadow: 0 4px 10px oklch(0.42 0.1 var(--shade-h) / .28); }
+body[data-theme="glass"] .send .ic { color: var(--light); }
+body[data-theme="glass"] .send:hover { transform: translateY(-1px); }
+body[data-theme="glass"] .send:active { transform: scale(.96); }
+body[data-theme="glass"] details.more { border: 0; padding: 0; background: var(--g-card); border-radius: var(--r-3); box-shadow: var(--edge); }
+body[data-theme="glass"] details.more summary { padding: 9px 12px; font-size: var(--fs-2); color: var(--ink); }
+body[data-theme="glass"] details.more .body { padding: 0 12px 10px 14px; }
+body[data-theme="glass"] details.more summary .chev { transition: none; transform: rotate(var(--chev, 0deg)); }  /* 回転は motion.js が中身の伸び縮みと同じバネで動かす */
+body[data-theme="glass"] details.more[open] summary .chev { transform: rotate(var(--chev, 90deg)); }
+/* 開くボタンは、閉じた欄が吸い込まれる先。欄の右上の角と同じ位置・同じ 44px（motion.js の HANDLE と合わせる） */
+body[data-theme="glass"] .handle { position: absolute; right: 0; top: 0; width: 44px; height: 44px; z-index: 3; border-radius: var(--r-3); background: var(--g-detail); box-shadow: var(--panel), var(--edge); color: var(--icon); }
+/* z-index: 左の3枚を重ねたとき紙の机に z-index 3 を付け、知らせのカードが紙の下に隠れて見えなくなっていた。
+   濃紺は透かさない。透かして後ろをぼかす形を試したら、紺が紙の白と混ざって灰色に濁り、カードが小さくて後ろの字も読めるほど透けなかった */
+body[data-theme="glass"] .toast { z-index: 10; background: var(--navy); }
+/* 中身の出入り: 文詳細が開くとき、中身は欄の幅と同じバネの進み具合で薄れ・浮き上がる（motion.js が --content-o・--content-y を書く）。
+   translate は transform と別の性質なので、文を移ったときの入れ替え（transform）とぶつからない */
+body[data-theme="glass"] .detail > * { opacity: var(--content-o, 1); translate: 0 var(--content-y, 0px); width: var(--content-w, auto); flex-shrink: 0; }
+/* 細いスクロールバー（ブラウザのままの太い棒を見せない） */
+body[data-theme="glass"] * { scrollbar-width: thin; scrollbar-color: rgb(120 145 165 / .35) transparent; }
+@media (prefers-reduced-motion: reduce) {
+  body[data-theme="glass"] * { animation: none !important; transition: none !important; }
+}
+
+/* 名前のカード（tooltip）: 乗せてから 0.35 秒待って出る（通りすがりに出さない）。Esc でポインターもフォーカスも動かさずに消せる（design-library の parts/tooltip.md・WCAG 1.4.13） */
+body[data-theme="glass"] .ibtn .tip { display: block; opacity: 0; transform: translateY(-3px); transition: opacity .12s, transform .45s var(--spring); pointer-events: none; }
+body[data-theme="glass"] .ibtn:hover .tip, body[data-theme="glass"] .ibtn:focus-visible .tip { opacity: 1; transform: none; transition-delay: .35s, .35s; }
+body[data-theme="glass"] .s { cursor: pointer; }
+body[data-theme="glass"] .s:hover { background-color: transparent !important; }
+body.notip .ibtn .tip { opacity: 0 !important; }
+body[data-theme="glass"] .label { margin: 0; }
+body[data-theme="glass"] .side-hint { margin-left: auto; font-size: var(--fs-1); font-weight: 400; color: var(--ink-sub); }
+.side-hint { margin-left: auto; font-size: var(--fs-1); font-weight: 400; }
+.sec > .label { margin: 0; }
+
+/* 文詳細の「対応する要件と段落」。切り出した項目と段落は、全文の画面の項目と同じ淡い面（.cov-req）に載せ、どこから来たかを頭の小さな行で示す */
+body[data-theme="glass"] .ref + .ref { margin-top: 12px; }
+body[data-theme="glass"] .ref-h { display: flex; align-items: center; gap: 6px; font-size: var(--fs-1); color: var(--ink-sub); }
+body[data-theme="glass"] .ref-go { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; border: 0; background: none; padding: 2px 4px; border-radius: var(--r-1); font: inherit; color: var(--ink-sub); cursor: pointer; }
+body[data-theme="glass"] .ref-go:hover { color: var(--ink); background: oklch(0.985 0.010 var(--light-h) / .6); }
+body[data-theme="glass"] .ref-t { margin: 4px 0 6px; font-size: var(--fs-2); font-weight: 700; color: var(--ink); }
+body[data-theme="glass"] .ref-b { padding: 8px 12px; border-radius: var(--r-3); background: oklch(0.985 0.010 var(--light-h) / .45); color: var(--ink-sub); }
+/* 「全文で見る」で送った先の項目を、着いたことが分かるように一度だけ縁取る。
+   色は「今の画面」と同じ差し色の濃紺にする（黄土は抜けの項目の縁に使っていて、着いた所が抜けに見えた） */
+body[data-theme="glass"] .cov { border-radius: var(--r-3); outline: 2px solid transparent; outline-offset: 6px; transition: outline-color .6s ease-out; }
+body[data-theme="glass"] .cov.flash { outline-color: var(--navy); transition: none; }
+
+/* 要件定義書の全文の画面: 該当文の無い項目（抜け）は、黄土の縁で目立たせる */
+body[data-theme="glass"] .cov-sum { margin: 0 4px; font-size: var(--fs-2); color: var(--ink-sub); }
+body[data-theme="glass"] .cov-sum.warn { color: var(--ink); font-weight: 600; }
+body[data-theme="glass"] .cov .k { display: flex; align-items: baseline; gap: 8px; }
+body[data-theme="glass"] .cov .k .n { margin-left: auto; flex: none; white-space: nowrap; font-size: var(--fs-1); font-weight: 500; color: var(--ink-sub); }
+body[data-theme="glass"] .cov-req { margin: 0 0 8px; padding: 8px 12px; border-radius: var(--r-3); background: oklch(0.985 0.010 var(--light-h) / .45); font-size: var(--fs-2); line-height: 1.7; color: var(--ink-sub); }
+/* 抜けの項目はカードの面を塗らない。黄土（81）を薄めて青い地（252）に重ねると補色どうしで濁り、くすんだ灰黄になった。
+   ← design-library の knowledge/color/light-and-shadow.md 2章「補色に近いほど濁る」。色は小さい所に集めて C を残す: 項目の枠を黄土の細い線で囲み、「該当文なし」を暗い黄土の字にする */
+body[data-theme="glass"] .cov.missing .cov-req { box-shadow: inset 0 0 0 1.5px var(--hl-missing); }
+body[data-theme="glass"] .cov.missing .k .n { color: oklch(0.50 0.09 75); font-weight: 700; }
+/* 一覧の中の文の引用も、本文と同じゴシックにそろえる（本文はゴシックに固定した） */
+body[data-theme="glass"] .list .q { font-family: var(--font-ui); font-size: var(--fs-2); line-height: 1.8; color: var(--ink-sub); margin-top: 0; }
+/* 対象の文は、コメントの下に一段沈んだ面で囲む（コメントと同じ地に続くと見分けにくかった）。角丸の面に左の線は付けない */
+body[data-theme="glass"] .list .qbox { margin-top: 8px; padding: 6px 10px 8px; border-radius: var(--r-2); background: color-mix(in oklch, var(--chip) 60%, transparent); }
+/* Obsidian のハイライト（==字==）。頭の色の絵文字に合わせて蛍光ペンの色を変える。文字の色は本文のまま */
+body[data-theme="glass"] .md-hl { color: inherit; background: oklch(0.94 0.08 95 / .75); border-radius: 3px; padding: 0 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+body[data-theme="glass"] .md-hl-red { background: oklch(0.93 0.05 25 / .8); }
+body[data-theme="glass"] .md-hl-blue { background: oklch(0.93 0.04 265 / .8); }
+body[data-theme="glass"] .md-hl-orange { background: oklch(0.94 0.06 65 / .8); }
+body[data-theme="glass"] .md-hl-green { background: oklch(0.94 0.05 175 / .8); }
+body[data-theme="glass"] .md-hl-yellow { background: oklch(0.95 0.08 100 / .8); }
+body[data-theme="glass"] .md-hl-purple { background: oklch(0.93 0.05 310 / .8); }
+body[data-theme="glass"] .list .q-label { display: block; font-size: var(--fs-1); font-weight: 600; color: var(--ink-sub); }
+
+/* スクロールバー: カードの角丸の内側に収め（上下に角丸ぶんの余白・縁から 3px 内側）、幅はいつも確保しておく。
+   出たり消えたりで使える幅が変わると、字の折り返しが切り替わって見えた。
+   Chrome は scrollbar-width・scrollbar-color を指定すると ::-webkit-scrollbar を見ないので、この3枚だけ既定（auto）に戻す */
+body[data-theme="glass"] :is(.detail, .paper, .side) { scrollbar-width: auto; scrollbar-color: auto; scrollbar-gutter: stable; }
+body[data-theme="glass"] :is(.detail, .paper, .side)::-webkit-scrollbar { width: 10px; }
+body[data-theme="glass"] :is(.detail, .paper, .side)::-webkit-scrollbar-track { background: transparent; margin: 18px 0; }
+body[data-theme="glass"] :is(.detail, .paper, .side)::-webkit-scrollbar-thumb { background-color: rgb(120 145 165 / .35); border: 3px solid transparent; background-clip: padding-box; border-radius: var(--r-pill); }
+body[data-theme="glass"] :is(.detail, .paper, .side)::-webkit-scrollbar-thumb:hover { background-color: rgb(120 145 165 / .6); }
+/* 確保したスクロールバーの幅（10px）ぶん右の余白を減らし、見た目の左右の余白をそろえる */
+body[data-theme="glass"] .detail { padding-right: 6px; }
+body[data-theme="glass"] .paper { padding-right: 46px; }
+body[data-theme="glass"] .side { padding-right: 4px; }
+
+/* コメントの出どころのカード（ユーザー／AI）。白いガラスの小さなカードに、右の印と同じ色の丸を添える */
+body[data-theme="glass"] .who { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px 1px 6px; margin-right: 6px; border-radius: var(--r-pill); font-size: var(--fs-1); font-weight: 600; color: var(--ink); }
+body[data-theme="glass"] .who::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--who); }
+body[data-theme="glass"] .who { background: oklch(0.985 0.010 var(--light-h) / .72); box-shadow: var(--edge); white-space: nowrap; }
+body[data-theme="glass"] .who-user { --who: var(--hl-user); }
+body[data-theme="glass"] .who-ai { --who: var(--hl-ai); }
+
+/* コメントの削除ボタン（アイコンだけ）。触れたときは白い面を敷く */
+body[data-theme="glass"] .cm .del { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; margin-left: 2px; border: 0; border-radius: var(--r-2); background: transparent; color: var(--ink-sub); cursor: pointer; transition: background-color .2s, color .2s; }
+body[data-theme="glass"] .cm .del .ic { width: 15px; height: 15px; }
+body[data-theme="glass"] .cm .del:hover { background: oklch(0.985 0.010 var(--light-h) / .85); color: var(--ink); }
+/* 押せるボタンを添えた知らせは、押せるようにする（ふだんの知らせは pointer-events: none） */
+body[data-theme="glass"] .toast.act { pointer-events: auto; display: flex; align-items: center; gap: 12px; padding-right: 8px; }
+body[data-theme="glass"] .toast .toast-act { border: 0; border-radius: var(--r-pill); padding: 4px 12px; font: inherit; font-size: var(--fs-2); font-weight: 600; color: var(--navy); background: oklch(0.985 0.010 var(--light-h) / .9); cursor: pointer; }
+
+/* コメントの頭の行: カード・宛先・日時・ボタンをそれぞれ折り返さない塊にし、幅が足りないときは塊ごと次の行へ送る。
+   ボタンは右にまとめる（解決済みの畳みの中のように狭い所で、「ユーザー」「未解決に戻す」が字の途中で割れていた） */
+body[data-theme="glass"] .cm .meta { flex-wrap: wrap; row-gap: 4px; column-gap: 8px; }
+body[data-theme="glass"] .cm .meta > * { white-space: nowrap; flex: none; }
+body[data-theme="glass"] .cm .meta .cm-acts { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
+body[data-theme="glass"] .cm .meta .cm-acts button { margin-left: 0; }
+body[data-theme="glass"] .cm .meta .who { margin-right: 0; }
+
+/* コメントの並びと「解決済み」の畳みのあいだに余白を置く（くっついてカードが重なって見えた） */
+body[data-theme="glass"] .cms + .more { margin-top: 8px; }
+body[data-theme="glass"] details.more + details.more { margin-top: 8px; }   /* 開閉のカードが続くとき、影が重なって1枚に見えないように離す */
+
+/* 左の3枚（アイコンの列・道具の列・本文の紙）を、紙を重ねるように少しずつかぶせる。
+   奥から アイコンの列 → 道具の列 → 紙 の順に、手前のカードが奥のカードの右端に --overlap だけ乗り、左へやわらかい影を落とす。
+   かぶさって隠れるぶん奥のカードの幅を足し、右の余白も同じだけ増やして、アイコンと字の位置は前と同じに見せる */
+body[data-theme="glass"] {
+  --overlap: 18px;
+  --stack-shadow: -2px 0 4px -2px oklch(var(--shade-near) / .20), -10px 0 22px -10px oklch(var(--shade-far) / .28);
+  grid-template-columns: calc(64px + var(--overlap)) calc(224px + var(--overlap)) 1fr;  /* 道具の欄はロゴの組（約165px）が収まるまで狭めた（前は 276px） */
+  column-gap: 0;
+}
+body[data-theme="glass"] .rail { position: relative; z-index: 1; padding-right: var(--overlap); }
+body[data-theme="glass"] .side { position: relative; z-index: 2; margin-left: calc(-1 * var(--overlap)); padding-right: calc(4px + var(--overlap)); box-shadow: var(--stack-shadow), var(--contact), var(--panel), var(--rim); }
+/* 紙は .desk の中にあり、.desk は中身を切り抜くので、左へ落とす影のぶん .desk を左へ広げて内側に余白を取る。
+   広げたところは道具の列の上にかぶさるので、.desk 自体は押せなくして、中身だけ押せるようにする */
+body[data-theme="glass"] .desk { position: relative; z-index: 3; margin-left: calc(-1 * var(--overlap) - 28px); padding-left: 28px; pointer-events: none; }
+body[data-theme="glass"] .desk > * { pointer-events: auto; }
+body[data-theme="glass"] .paper { box-shadow: var(--stack-shadow), var(--panel), var(--edge); }
+/* 窓の縁との余白は取らず、カードを窓の端まで広げる。窓の四隅に当たる角（アイコンの列の左の2つ・文詳細の右の2つ）だけ角丸を外して埋める。それ以外の角は今までどおり丸める */
+body[data-theme="glass"] .rail { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+body[data-theme="glass"] .detail { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+/* 文詳細が閉じているときは本文の紙が一番右のカードなので、紙の右の2つの角を外す（開閉の途中は motion.js が同じ進み具合で動かす） */
+body[data-theme="glass"].closed .paper { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+/* 手前のカードの下に隠れる右側は角丸にしない。角丸だと、手前のカードの角丸の隙間から奥のカードの角が見えた */
+body[data-theme="glass"] :is(.rail, .side) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+
+/* 文の数: 数字だけを太字で右にそろえる。単位の「文」は見出しから分かるので見た目だけ隠し、読み上げには残す
+   （角丸で囲うと過剰に見えたので、数字だけを太字にした。カード・数字＋単位・点・棒の5つを並べて選んだ） */
+body[data-theme="glass"] .key .n { min-width: 0; padding: 0; background: none; box-shadow: none; line-height: 1;
+  font-size: var(--fs-2); font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.n b, .n i { font-style: normal; font-weight: inherit; }
+body[data-theme="glass"] .key .n i { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+body[data-theme="glass"] .key[aria-disabled="true"] .n { opacity: .45; }
+
+/* 役割とコメントの出どころの形の印（色だけで示すと認知負荷が高いため）。
+   色に加えて形で見分ける（主張は旗・評価は星・理由は鍵・根拠はデータの棒・解説は i・報告は拡声器・ユーザーは人・AI はきらめき。形は ../icons/src/draw.py）。
+   印の色は役割の色の明るさを 0.24 下げて彩度を少し足したもの。役割の色（明るさ 0.72）のままだとカードの面との比が 2 を切り、
+   意味を持つ図形に要る 3:1（WCAG 1.4.11）に届かない */
+body[data-theme="glass"] .ic.mark { width: 16px; height: 16px; color: oklch(from var(--k) calc(l - 0.24) calc(c + 0.03) h); }
+body[data-theme="glass"] .key .w::before { display: none; }
+body[data-theme="glass"] .key[aria-disabled="true"] .ic.mark { opacity: .5; }
+body[data-theme="glass"] .func-role .clause.role::before, body[data-theme="glass"] .who::before { display: none; }
+body[data-theme="glass"] .who .ic.mark { width: 12px; height: 12px; color: oklch(from var(--who) calc(l - 0.24) calc(c + 0.03) h); }
+body[data-theme="glass"] .func-role .clause.role .ic.mark { width: 18px; height: 18px; }
+
+/* 本文の印に形を付ける（形があるほうが見やすいため）。
+   文の頭の行の高さの中央に 18px の形を置き、印の線はその下から文の終わりまで続ける。
+   形のぶん左右の余白を 26 → 32px に広げ、外へ 14 → 20px はみ出させて、本文の字の位置は前と同じにする */
+body[data-theme="glass"] .s { padding-left: 32px; padding-right: 32px; margin-left: -20px; margin-right: -20px; }
+body[data-theme="glass"] .s .mk-l, body[data-theme="glass"] .s .mk-r { position: absolute; top: 15px; width: 18px; height: 18px; pointer-events: none; }
+body[data-theme="glass"] .s .mk-l { left: 7px; }
+body[data-theme="glass"] .s .mk-r { right: 7px; }
+body[data-theme="glass"] .s::before { left: 14px; }
+body[data-theme="glass"] .s::after { right: 14px; }
+body[data-theme="glass"] .s.has-l::before, body[data-theme="glass"] .s.has-r::after { top: 38px; width: 3px; }
+
+/* 説明カード（hint.js）。ブラウザ標準の title の代わり。ほかのカードと同じすりガラスの面・縁の光・影にし、ポインターに重ねない位置に出す */
+.hint[hidden] { display: none; }
+/* popover の既定（四辺 0・margin auto・枠線・はみ出しのスクロール）を外し、位置は placeHint の left・top で決める */
+body[data-theme="glass"] .hint[popover] { inset: auto; margin: 0; border: 0; overflow: visible; }
+body[data-theme="glass"] .hint { position: fixed; z-index: 20; max-width: 320px; padding: 8px 12px; border-radius: var(--r-2);
+  background: var(--sheen), var(--frost), var(--g-card); background-blend-mode: normal, overlay, normal;
+  box-shadow: var(--contact), var(--lift), var(--rim); color: var(--ink); font-size: var(--fs-2); line-height: 1.6; pointer-events: auto;
+  opacity: 0; translate: var(--hx, 0) var(--hy, 4px); scale: .96; transform-origin: var(--ho, 50% 100%);
+  transition: opacity .14s ease-in, translate .14s ease-in, scale .14s ease-in; }
+/* 説明カードの登場と退場。
+   カードは指した要素の側から少しずれて膨らみながら出て、バネで着く。退場は入場より短く（yui540 の型: 退場は入場の 0.55〜0.85 倍・knowledge/motion/yui540.md）、
+   加速しながら元の側へ縮んで消える。向き（--hx・--hy）と縮む中心（--ho）は hint.js が置いた位置から決める */
+body[data-theme="glass"] .hint.on { opacity: 1; translate: 0 0; scale: 1;
+  transition: opacity .16s ease-out, translate .45s var(--spring), scale .45s var(--spring); }
+@media (prefers-reduced-motion: reduce) { body[data-theme="glass"] .hint, body[data-theme="glass"] .hint.on { translate: 0 0; scale: 1; transition: opacity .12s; } }
+body[data-theme="glass"] .hint.rich { width: 300px; padding: 14px 16px 12px; border-radius: var(--r-3); }
+.hint-name { margin: 0; }
+.hint-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+/* 例は性質の文から外し、名前の下に薄い斜体の太字で添える（少なくとも黒ではない色にする） */
+.hint-text { margin: 0; line-height: 1.75; }
+.hint-ex { margin: 0 0 10px 24px; font-size: var(--fs-1); font-style: italic; font-weight: 700; color: var(--ink-sub); }
+.hint-head b { font-size: var(--fs-3); }
+.hint-kind { font-size: var(--fs-1); color: var(--ink-sub); padding: 1px 8px; border-radius: var(--r-pill); background: oklch(0.985 0.010 var(--light-h) / .7); box-shadow: var(--edge); }
+.hint-n { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { body[data-theme="glass"] .hint { transition: none; } }
+/* 説明カードの透かし。
+   分類の形をカードの右下に大きく敷き、カードの縁で切る。色は分類の色をうっすら透かし、左上の光（縁の白）と右下の影（紫側）を1px ずつ付けて、
+   ガラスに彫り込んだように見せる。光は左上から1つ（light-and-shadow.md）。字の下に敷き、字の読みやすさを先に取る */
+body[data-theme="glass"] .hint.rich { overflow: hidden; }
+.hint-head, .hint-ex, .hint-text { position: relative; z-index: 1; }
+.hint-wm { position: absolute; right: -18px; bottom: -22px; z-index: 0; width: 120px; height: 120px; pointer-events: none;
+  color: oklch(from var(--k) l c h / .16);
+  filter: drop-shadow(1px 1px 0 oklch(0.985 0.010 var(--light-h) / .9)) drop-shadow(-1px -1px 0 oklch(var(--shade-near) / .10)); }
+/* 丸い形と、右下が欠けた形（拡声器）はカードの角との間にすき間が残るので、さらに右下へ寄せて角まで届かせる */
+.hint-wm[data-wm="role-explanation"] { right: -28px; bottom: -32px; }
+/* 拡声器は上下はほかと同じで、横だけ寄せる。右端は 24 の格子の 19（120px の箱で右に 25px の空き）なので、箱を 25px はみ出させてカードの右端にそろえる */
+.hint-wm[data-wm="role-report"] { right: -25px; }
+body[data-theme="glass"] .hint-wm .ic { width: 100%; height: 100%; color: inherit; }  /* 全体の .ic の紺より先に、透かしの色を受け継ぐ */
+/* 書込の欄の見出しの「コメント」は画面に出さず、読み上げの名前にだけ残す（外側の「コメント」の字は不要なため）。
+   宛先（「接続 へ」）があるときだけ見出しの行を出す */
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+body[data-theme="glass"] .form label:not(:has(.to)) { margin: 0; }
+/* 「左の印」「右の印」の字の代わりの小さな図（字で表示するより図のほうが分かりやすいため）。
+   文の行を3本描き、印の出る側にだけ線を付けて、本文のどこに出るかを形で見せる */
+body[data-theme="glass"] .side-hint { display: inline-flex; align-items: center; }
+.pict { width: 32px; height: 20px; }
+.pict-lines { fill: oklch(0.522 0.026 248 / .35); }
+.pict-bar { fill: var(--ink-sub); }
+/* 凡例に乗せている間は、本文で同じ分類の文の印だけを残し、ほかの印を薄くする（凡例と本文の印の対応を見せる） */
+/* 役割に乗せたら左の印、コメントに乗せたら右の印だけを相手にする */
+body[data-lighting="l"] .s:not(.lit)::before, body[data-lighting="l"] .s:not(.lit) .mk-l,
+body[data-lighting="r"] .s:not(.lit)::after, body[data-lighting="r"] .s:not(.lit) .mk-r { opacity: .18; }
+body[data-lighting="l"] .s.lit .mk-l, body[data-lighting="r"] .s.lit .mk-r { transform: scale(1.15); }
+.s::before, .s::after, .s .mk-l, .s .mk-r { transition: opacity .2s, transform .45s var(--spring); }
+/* 段落目次の行は、字数で切らず欄の幅で切って「…」で省く（欄の幅を変えても折り返さない） */
+body[data-theme="glass"] .toc button .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+body[data-theme="glass"] :is(.side .sec, .toc, .toc li) { min-width: 0; }
+body[data-theme="glass"] .toc button { width: 100%; min-width: 0; }
+
+/* 今の画面の濃紺を液体で移す（liquid.js）。ボタン自体の濃紺の面はやめ、後ろの層の2つの丸い四角が流れて移る。
+   層に #goo（ぼかし→輪郭の切り直し）をかけるので、影はフィルターのあとに drop-shadow で付ける（先に付けると切り直しで消える） */
+body[data-theme="glass"] .rail-goo { position: absolute; inset: 0; pointer-events: none; z-index: 0;
+  filter: url(#goo) drop-shadow(0 6px 10px oklch(0.42 0.1 var(--shade-h) / .3)); }
+body[data-theme="glass"] .rail-goo i { position: absolute; left: 0; top: 0; width: 44px; height: 44px; border-radius: 13px; background: var(--navy); transform-origin: 50% 50%; will-change: transform; }
+body[data-theme="glass"] .rail button { position: relative; z-index: 1; }
+body[data-theme="glass"] .rail button[aria-current="true"] { background: transparent; box-shadow: none; }
+body[data-theme="glass"] .rail button .ic { transition: color .18s .12s; }
+/* 重なりを分ける: ホバーの薄い面（::before）と紺のアイコン（z 0）→ 濃紺の液体（z 1）→ 白いアイコンの写し（z 2）。
+   前はボタンを液体より手前に置いていたので、ホバーの面が流れてくる濃紺の上に重なっていた */
+body[data-theme="glass"] .rail-goo { z-index: 1; }
+body[data-theme="glass"] .rail button { z-index: auto; background: transparent !important; }
+body[data-theme="glass"] .rail button::before { content: ""; position: absolute; inset: 0; z-index: 0; border-radius: 13px; background: transparent; transition: background-color .2s; }
+/* ホバーでボタンを持ち上げない。transform はボタンを独立した重なりの単位にし、今の画面のボタンに乗せるとアイコンが濃紺の下へ潜る */
+body[data-theme="glass"] .rail button:hover { transform: none; }
+/* アイコンは、紺の本体を濃紺の下（z 0）に、白い写し（liquid.js の .rail-hi）を濃紺の上（z 2）に置く。
+   写しは濃紺が覆っている範囲で毎フレーム切り抜くので、白くなるのは液体が上を流れている所だけ */
+body[data-theme="glass"] .rail button .ic, body[data-theme="glass"] .rail button[aria-current="true"] .ic { position: relative; z-index: 0; color: var(--icon); transition: none; }
+body[data-theme="glass"] .rail-hi { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+body[data-theme="glass"] .rail-hi .ic { position: absolute; left: 0; top: 0; width: 22px; height: 22px; color: var(--light); will-change: transform, clip-path; }
+/* 欄が開いているときの分類のカードは、道具の欄の中に収める（hint.js の .inside）。透かしも欄の幅に合わせて小さくする */
+body[data-theme="glass"] .hint.rich.inside .hint-wm { width: 96px; height: 96px; }
+/* ホバーの淡い液体（liquid.js の .rail-goo.hov）。今の画面の濃紺とアイコンより奥に置き、影は付けない。
+   前のボタンごとの淡い四角（::before）はやめた */
+body[data-theme="glass"] .rail-goo.hov { z-index: 0; filter: url(#goo); }
+body[data-theme="glass"] .rail-goo.hov i { background: oklch(0.925 0.024 255); }
+
+/* 重要度の切り替え。押した方の文だけ濃く残し、ほかの文は字も印も薄くして骨組みを読ませる。
+   薄さは .32: 薄い方も読めて、濃い方との差が一目で分かる値。押した行は面を白いガラスにして押したままだと示す */
+body[data-theme="glass"] .s .in, body[data-theme="glass"] .s .mk-l, body[data-theme="glass"] .s .mk-r { transition: opacity .28s ease; }
+body[data-theme="glass"][data-imp="core"] .s:not([data-imp="core"]) .in, body[data-theme="glass"][data-imp="core"] .s:not([data-imp="core"]) .mk-l, body[data-theme="glass"][data-imp="core"] .s:not([data-imp="core"]) .mk-r,
+body[data-theme="glass"][data-imp="sub"] .s:not([data-imp="sub"]) .in, body[data-theme="glass"][data-imp="sub"] .s:not([data-imp="sub"]) .mk-l, body[data-theme="glass"][data-imp="sub"] .s:not([data-imp="sub"]) .mk-r { opacity: .32; }
+body[data-theme="glass"] .key[aria-pressed="true"] { background: oklch(0.985 0.010 var(--light-h) / .85); box-shadow: var(--rim); }
+body[data-theme="glass"][data-imp="core"] .s:not([data-imp="core"])::before, body[data-theme="glass"][data-imp="core"] .s:not([data-imp="core"])::after,
+body[data-theme="glass"][data-imp="sub"] .s:not([data-imp="sub"])::before, body[data-theme="glass"][data-imp="sub"] .s:not([data-imp="sub"])::after { opacity: .32; }
+
+/* 副の役割（1文が複数の性質を併せ持つため、主と副に分ける）。
+   本文では主の印（18px）の左に 13px の形を横に並べ、本文に一番近い所を主にする。縦に並べると読みにくかった
+   （本文に出さない案・右下に重ねる案と並べて選んだ）。
+   道具の欄では主の数の左に「副 n」を小さく出す。文機能の見出しでは主の名前のあとに、副の名前を細い字で並べる */
+body[data-theme="glass"] .s .mk-sub { position: absolute; left: calc(9px - 17px * (var(--i) + 1)); top: 18px; width: 13px; height: 13px; pointer-events: none; opacity: .9; }
+body[data-theme="glass"] .key .sub-n { margin-left: auto; margin-right: 10px; font-size: var(--fs-1); color: var(--ink-sub); font-variant-numeric: tabular-nums; }
+body[data-theme="glass"] .key .sub-n + .n { margin-left: 0; }
+body[data-theme="glass"] .func-role .clause.role .sub-role { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; font-size: var(--fs-2); font-weight: 400; color: var(--ink-sub); }
+body[data-theme="glass"] .func-role .clause.role .sub-role .ic.mark { width: 13px; height: 13px; }
+body[data-lighting="l"] .s:not(.lit) .mk-sub { opacity: .18; }
+body[data-theme="glass"][data-imp="core"] .s:not([data-imp="core"]) .mk-sub, body[data-theme="glass"][data-imp="sub"] .s:not([data-imp="sub"]) .mk-sub { opacity: .32; }
+
+/* 重要度のチップ（詳細パネル）。役割のチップの右に、同じ白いガラスの丸い面で並べる。字は役割より一段小さく、役割を主に見せる */
+body[data-theme="glass"] .func-role { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+body[data-theme="glass"] .func-role .clause.imp { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-2); font-weight: 600; color: var(--ink); padding: 5px 12px 5px 9px; border-radius: var(--r-pill); border-bottom: 0;
+  background: oklch(0.985 0.010 var(--light-h) / .72); box-shadow: var(--rim); cursor: pointer; }
+body[data-theme="glass"] .func-role .clause.imp .ic.mark { width: 12px; height: 12px; }
+body[data-theme="glass"] .func-role .clause.imp[aria-pressed="true"] { color: var(--navy); box-shadow: var(--rim), 0 0 0 1.5px var(--navy); }
+
+/* 本文の重要度: 核の文の字を 500 の太さにし、衛星は 400 のまま。
+   左の外の丸（小さくて見落とす）・600 の太さ（ページが重い）・文末の丸（丸だけ次の行へ落ちる）と並べて選んだ。
+   ふだんはほのめかす程度にとどめ、はっきり見るときは道具の欄の重要度の切り替えを使う */
+body[data-theme="glass"] .s[data-imp="core"] .in { font-weight: 500; }
+
+/* キーの案内。
+   ON のときだけ、操作できる所のすぐ側に、コメントの送るボタンの横のキーと同じ小さな面のキーを出す。出し入れは少し浮いてから着く */
+body[data-theme="glass"] .kb { display: inline-flex; align-items: center; padding: 0 6px; border-radius: var(--r-1); background: var(--chip); color: var(--ink);
+  font-family: var(--font-ui); font-size: var(--fs-1); font-weight: 600; line-height: 1.7; white-space: nowrap; pointer-events: none;
+  opacity: 0; translate: 0 3px; transition: opacity .2s ease, translate .35s var(--spring); }
+body[data-theme="glass"][data-keys="on"] .kb { opacity: 1; translate: 0 0; }
+/* 案内を出すキー（?）だけは OFF でも出しておく。消えていると、案内があること自体に気づけない */
+body[data-theme="glass"] .kb.kb-always { opacity: 1; translate: 0 0; }
+body[data-theme="glass"] .kb-rail { position: absolute; right: -2px; bottom: -2px; z-index: 3; min-width: 16px; justify-content: center; padding: 0 4px; font-size: 11px; line-height: 16px; box-shadow: 0 1px 2px oklch(var(--shade-near) / .18); }
+body[data-theme="glass"] .kb-at { margin-left: auto; font-weight: 500; color: var(--ink-sub); }
+body[data-theme="glass"] .bar .kb + .kb { margin-left: 6px; font-weight: 500; color: var(--ink-sub); }
+/* アイコンの列の下の ON・OFF。今の画面の濃紺の丸い四角と取り違えないよう、ON は濃紺の細い縁で示す */
+body[data-theme="glass"] .rail .kb-toggle { margin-bottom: 6px; }
+body[data-theme="glass"] .rail .kb-toggle .ic { color: var(--ink-sub); transition: color .2s; }
+body[data-theme="glass"] .rail .kb-toggle:hover .ic, body[data-theme="glass"] .rail .kb-toggle[aria-pressed="true"] .ic { color: var(--navy); }
+body[data-theme="glass"] .rail .kb-toggle[aria-pressed="true"] { box-shadow: inset 0 0 0 1.5px var(--navy); }
+
+/* 説明カードの名前の横のキー。キーの案内のキー（.kb）と同じ面 */
+body[data-theme="glass"] .hint-kbd { display: inline-block; margin-left: 8px; padding: 0 6px; border-radius: var(--r-1); background: var(--chip); color: var(--ink);
+  font-family: var(--font-ui); font-size: var(--fs-1); font-weight: 600; line-height: 1.7; vertical-align: 1px; }
+/* 本文コピー: 文書名の右に小さなボタン、押すと下に2択のメニュー（記事全部・本文だけ） */
+body[data-theme="glass"] .doc { display: flex; align-items: center; gap: 6px; }
+body[data-theme="glass"] .doc h1 { flex: 1; min-width: 0; }
+body[data-theme="glass"] .copy-wrap { position: relative; flex: none; }
+body[data-theme="glass"] .copy-btn { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: var(--r-2); background: transparent; color: var(--ink-sub); cursor: pointer; }
+body[data-theme="glass"] .copy-btn:hover, body[data-theme="glass"] .copy-btn[aria-expanded="true"] { background: var(--chip); color: var(--ink); }
+body[data-theme="glass"] .copy-btn .ic svg { width: 18px; height: 18px; }
+body[data-theme="glass"] .pop { position: absolute; z-index: 20; padding: 6px; border-radius: var(--r-3); background: var(--light); box-shadow: var(--lift), var(--edge); display: grid; gap: 2px; }
+body[data-theme="glass"] .copy-menu { right: 0; top: calc(100% + 6px); min-width: 220px; }
+body[data-theme="glass"] .pop button { display: grid; text-align: left; gap: 2px; padding: 8px 10px; border: 0; border-radius: var(--r-2); background: transparent; font: inherit; font-size: var(--fs-2); font-weight: 600; color: var(--ink); cursor: pointer; }
+body[data-theme="glass"] .pop .sub { font-size: var(--fs-1); font-weight: 400; color: var(--ink-sub); }
+/* 文の中の Markdown: 行内のコードは等幅の淡い面、脚注の呼び出しは上付きの小さな字、リンクは移らない字なので下線だけ */
+body[data-theme="glass"] .s .in code { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: .88em; padding: 1px 5px; border-radius: var(--r-1); background: oklch(0.94 0.012 250 / .8); }
+body[data-theme="glass"] .s .in strong { font-weight: 700; }
+body[data-theme="glass"] .s .in .fn-ref { font-size: .7em; color: var(--ink-sub); margin-left: 1px; }
+body[data-theme="glass"] .s .in .md-link { text-decoration: underline; text-decoration-color: oklch(0.75 0.03 250); text-underline-offset: 3px; }
+body[data-theme="glass"] .cm .addressed { color: var(--ink-sub); }
+/* 文書の画面（真ん中の要件定義書・設計書）。項目と段落は本文の文と同じ .s で、ホバーと選択のカードが乗る。
+   見出しは本文の見出しより一段小さく、件数は右に寄せる。担う文の無い項目は件数の字を黄土にして、抜けが目に留まるようにする（要件網羅と同じ色） */
+body[data-theme="glass"] .doc-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 8px 0 22px; font-family: var(--font-ui); font-size: var(--fs-2); font-weight: 600; color: var(--ink-sub); }
+body[data-theme="glass"] .doc-title .ic svg { width: 18px; height: 18px; }
+body[data-theme="glass"] .doc-title .where { font-weight: 400; }
+body[data-theme="glass"] .s.docitem { display: block; margin: 0 -14px 10px; padding: 14px 26px; cursor: pointer; }
+body[data-theme="glass"] .docitem-h { display: flex; align-items: baseline; gap: 12px; margin: 0 0 6px; font-size: var(--fs-3); font-weight: 700; line-height: 1.6; color: var(--ink); }
+body[data-theme="glass"] .docitem-h .n { margin-left: auto; flex: none; font-family: var(--font-ui); font-size: var(--fs-1); font-weight: 500; color: var(--ink-sub); }
+body[data-theme="glass"] .docitem.missing .docitem-h .n { color: oklch(0.50 0.09 75); font-weight: 700; }
+body[data-theme="glass"] .docitem .md { font-size: var(--fs-2); line-height: 1.85; color: var(--ink); }
+body[data-theme="glass"] .docitem .md :is(ul, ol) { margin: 4px 0; padding-left: 1.3em; }
+body[data-theme="glass"] .docitem .md p { margin: 4px 0; }
+body[data-theme="glass"] #detail h3.k .n { white-space: nowrap; }
+/* 前のバージョンの設計書に照らした文の印。抜けではないので警告の色にせず、淡い面の小さな札にする */
+body[data-theme="glass"] .list .meta .stale { margin-left: 8px; padding: 0 6px; border-radius: var(--r-1); background: var(--chip); color: var(--ink-sub); }
+/* 本文コピーの方言の切り替え。メニューの頭に3つ並べ、選んだものだけ濃紺の面にする */
+body[data-theme="glass"] .copy-menu .flavor { display: flex; gap: 2px; padding: 2px; margin-bottom: 4px; border-radius: var(--r-2); background: var(--chip); }
+body[data-theme="glass"] .copy-menu .flavor button { flex: 1; display: block; text-align: center; padding: 4px 6px; font-size: var(--fs-1); font-weight: 600; color: var(--ink-sub); }
+/* 本文コピーのメニューの登場と退場。説明カード（.hint）と同じ型で、ボタンのある右上から膨らんでバネで着き、退場は短く加速しながら縮む。隠すのは退場の .14 秒のあと（app.js の copyMenu） */
+body[data-theme="glass"] .pop { opacity: 0; translate: 0 -4px; scale: .94; transform-origin: var(--pop-o, 100% 0);
+  transition: opacity .14s ease-in, translate .14s ease-in, scale .14s ease-in; }
+body[data-theme="glass"] .pop.on { opacity: 1; translate: 0 0; scale: 1;
+  transition: opacity .16s ease-out, translate .45s var(--spring), scale .45s var(--spring); }
+.pop[hidden] { display: none !important; }
+/* メニューの中の液体（liquid.js の pair）。ホバーは淡い面、選んだ方言は濃紺。どちらも #goo で2つの丸い四角をつなぐ。
+   文字は液体より手前に置き、選んだ方言の文字だけ白くする（濃紺が流れてくる間に色が切り替わる） */
+body[data-theme="glass"] .copy-menu .flavor { position: relative; }
+body[data-theme="glass"] .menu-goo { position: absolute; inset: 0; pointer-events: none; z-index: 0; filter: url(#goo); }
+body[data-theme="glass"] .menu-goo i { position: absolute; left: 0; top: 0; border-radius: var(--r-2); will-change: transform, width, height; }
+body[data-theme="glass"] .menu-goo.hov i { background: var(--chip); }
+body[data-theme="glass"] .menu-goo.sel i { background: var(--navy); }
+body[data-theme="glass"] .pop button { position: relative; z-index: 1; outline: 0; }
+/* 白に変わるのは濃紺が着くころ（先頭のバネが着くのは約 .12 秒後）。前は先に白くなり、淡い面の上で一瞬読めなかった */
+body[data-theme="glass"] .copy-menu .flavor button { transition: color .18s ease-out .1s; }
+body[data-theme="glass"] .copy-menu .flavor button[aria-checked="true"] { color: oklch(0.985 0.010 85); }
+@media (prefers-reduced-motion: reduce) { body[data-theme="glass"] .pop, body[data-theme="glass"] .pop.on { translate: 0 0; scale: 1; transition: opacity .12s; } }
+/* 差分。切り替えは道具の欄の「変更」の節。押した行は重要度の行と同じ押された見た目。
+   消えた字は淡い赤の面に取り消し線、足した字は淡い緑の面に下線。色は面に薄く、字の色は本文のまま（読める濃さを保つ） */
+body[data-theme="glass"] .sec-diff .rounds { margin-left: auto; white-space: nowrap; display: inline-flex; align-items: center; gap: 2px; font-weight: 600; font-size: var(--fs-1); color: var(--ink); }
+body[data-theme="glass"] .sec-diff .rbtn { width: 22px; height: 22px; border: 0; border-radius: var(--r-1); background: transparent; font-size: 15px; line-height: 1; color: var(--ink); cursor: pointer; }
+body[data-theme="glass"] .sec-diff .rbtn:disabled { opacity: .3; cursor: default; }
+body[data-theme="glass"] .sec-diff .rbtn:not(:disabled):hover { background: var(--chip); }
+/* 見方の切り替え（重要度と変更の、ハイライト・フィルター）。どちらか1つが押された状態で、押した方は面の色と字の濃さで示す */
+body[data-theme="glass"] .mode-toggle { margin-left: auto; display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--r-2); background: var(--chip); }
+body[data-theme="glass"] .mode-toggle .mbtn { width: 26px; height: 24px; display: grid; place-items: center; border: 0; border-radius: var(--r-1); background: transparent; color: var(--ink-sub); cursor: pointer; }
+body[data-theme="glass"] .mode-toggle .mbtn .ic { display: grid; width: 15px; height: 15px; }
+body[data-theme="glass"] .mode-toggle .mbtn .ic svg { width: 15px; height: 15px; }
+body[data-theme="glass"] .mode-toggle .mbtn[aria-pressed="true"] { background: var(--g-card); color: var(--ink); box-shadow: var(--edge); }
+body[data-theme="glass"] .mode-toggle .mbtn:focus-visible { outline: 2px solid var(--navy); outline-offset: 1px; }
+/* 液体（liquid.js）が描くときは、押している方の白い面と影を液体の層に任せ、ボタンは液体より手前に置く */
+body[data-theme="glass"] .mode-toggle.lq { position: relative; }
+body[data-theme="glass"] .mode-toggle.lq .mbtn { position: relative; z-index: 1; transition: color var(--dur-fast) var(--ease-out); }
+body[data-theme="glass"] .mode-toggle.lq .mbtn[aria-pressed="true"] { background: transparent; box-shadow: none; }
+body[data-theme="glass"] .menu-goo.mode-sel { filter: url(#goo) drop-shadow(0 1px 2px oklch(0.42 0.05 var(--shade-h) / .22)); }
+body[data-theme="glass"] .menu-goo.mode-sel i { background: var(--g-card); }
+/* ホバーは選択の白いカードと見分けがつくよう、地の色（--chip）に白を半分足した不透明な色にする。
+   半透明にすると #goo が透明度で輪郭を切り直すので面が消え、55% の透明度では選択とほぼ同じ白に見えた */
+body[data-theme="glass"] .menu-goo.mode-hov i { background: color-mix(in oklch, var(--g-card) 50%, var(--chip)); }
+/* 下の段の時刻と起点の回が節の幅に入りきらず、行のカードと見出しの切り替えが右へ14px はみ出した。
+   時刻の字は縮めて入らない分を「…」で切り、カードは節の幅を超えないようにする */
+body[data-theme="glass"] .sec-diff #legend-diff { min-width: 0; }
+body[data-theme="glass"] .sec-diff .diff-foot { display: flex; align-items: center; gap: 4px; margin: 4px 2px 0 10px; min-width: 0; }
+body[data-theme="glass"] .sec-diff .since { margin: 0; font-size: var(--fs-1); color: var(--ink-sub); white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+body[data-theme="glass"] :is(.s .in, .memo, .md-diff, h2, h3, h4) del { background: oklch(0.93 0.035 25); color: oklch(0.42 0.06 25); text-decoration: line-through; text-decoration-color: oklch(0.55 0.10 25); border-radius: 3px; }
+body[data-theme="glass"] :is(.s .in, .memo, .md-diff, h2, h3, h4) ins { background: oklch(0.93 0.045 150); text-decoration: underline; text-decoration-color: oklch(0.55 0.10 150); text-underline-offset: 3px; border-radius: 3px; }
+body[data-theme="glass"] .dif { margin: 0 0 18px; }
+body[data-theme="glass"] .dif-h { display: flex; align-items: center; gap: 10px; margin: 0 0 2px 12px; font-family: var(--font-ui); font-size: var(--fs-1); color: var(--ink-sub); }
+body[data-theme="glass"] .dif-h .tag { padding: 0 8px; border-radius: var(--r-pill); background: var(--chip); color: var(--ink); font-weight: 600; }
+body[data-theme="glass"] .dif-h .tag-new { background: oklch(0.93 0.045 150); }
+body[data-theme="glass"] .dif .s { display: block; }
+/* 変更のカードの中では、文の左右の線（役割の色）を出さない。カードは文章構造を見る所ではなく、紙の色の線が棒に見えた */
+body[data-theme="glass"] .dif .s::before, body[data-theme="glass"] .dif .s::after { display: none; }
+/* 文書の画面の差分。本文は Markdown を描かず字の差分のまま見せるので、行を保つ。消えた項目は選べない塊として最後に並べる */
+body[data-theme="glass"] .docitem .md-diff { white-space: pre-wrap; }
+body[data-theme="glass"] .docitem-h .tag { flex: none; padding: 0 8px; border-radius: var(--r-pill); background: var(--chip); font-family: var(--font-ui); font-size: var(--fs-1); font-weight: 600; color: var(--ink); }
+body[data-theme="glass"] .docitem-h .tag-new { background: oklch(0.93 0.045 150); }
+body[data-theme="glass"] .docitem-h .tag-removed { background: oklch(0.93 0.035 25); }
+body[data-theme="glass"] .docitem.gone { margin: 0 -14px 10px; padding: 14px 26px; opacity: .8; }
+/* 起点の回の一覧（＜＞だけで回を辿るのは不便なため）。本文コピーと同じ .pop の型で、節の見出しの下から開く。
+   1ページ8回で、下にページ送り。今の起点の行は淡い面で示す */
+body[data-theme="glass"] .sec-diff { position: relative; }
+body[data-theme="glass"] .round-menu { left: 0; right: 0; top: calc(100% + 4px); --pop-o: 50% 0; }   /* 起点の回をカードの下の段へ移したので、一覧も節の下に開く */
+body[data-theme="glass"] .pop-list { display: grid; gap: 2px; }
+body[data-theme="glass"] .round-menu .row { grid-template-columns: 22px 1fr auto; column-gap: 8px; align-items: baseline; }
+body[data-theme="glass"] .round-menu .row .no { font-size: var(--fs-1); color: var(--ink-sub); }
+body[data-theme="glass"] .round-menu .row .cnt { font-size: var(--fs-1); font-weight: 500; color: var(--ink-sub); }
+body[data-theme="glass"] .round-menu .row .sub { grid-column: 2 / 4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body[data-theme="glass"] .round-menu .row[aria-checked="true"] { background: oklch(0.985 0.010 var(--light-h) / .9); box-shadow: var(--rim); }
+body[data-theme="glass"] .round-menu .pager { display: flex; align-items: center; justify-content: center; gap: 8px; padding-top: 4px; font-size: var(--fs-1); color: var(--ink-sub); }
+body[data-theme="glass"] .round-menu .pager button { display: block; width: 26px; padding: 2px 0; text-align: center; font-size: 15px; }
+body[data-theme="glass"] .round-menu .pager button:disabled { opacity: .3; cursor: default; }
+body[data-theme="glass"] .sec-diff .r { padding: 1px 6px; border: 0; border-radius: var(--r-1); background: transparent; font: inherit; font-weight: 600; color: var(--ink); cursor: pointer; }
+body[data-theme="glass"] .sec-diff .r:hover, body[data-theme="glass"] .sec-diff .r[aria-expanded="true"] { background: var(--chip); }
+/* ユーザーと AI の両方のコメントがある文の2つめの印。左の副の役割の印（.mk-sub）と同じ大きさで、右の外へ並べる */
+body[data-theme="glass"] .s .mk-r2 { position: absolute; right: calc(9px - 17px); top: 18px; width: 13px; height: 13px; pointer-events: none; opacity: .9; }
+body[data-lighting="r"] .s:not(.lit) .mk-r2 { opacity: .18; }
+body[data-theme="glass"][data-imp="core"] .s:not([data-imp="core"]) .mk-r2, body[data-theme="glass"][data-imp="sub"] .s:not([data-imp="sub"]) .mk-r2 { opacity: .32; }
+/* ライブラリ。
+   すりガラスの窓を真ん中に出し、後ろは影と同じ紺紫（色相 265）を薄く敷いてぼかす（黒い幕にしない・light-and-shadow.md の P2）。
+   登場と退場は .pop と同じ型（バネで着く・短く加速して縮む）。行は文書の画面の項目と同じ、ホバーで淡い面・今の記録は縁の光 */
+body[data-theme="glass"] .rail .rail-sep { width: 22px; height: 1.5px; margin: -2px 0; border-radius: 1px; background: oklch(0.80 0.02 255); }
+/* 上下の真ん中に置くと、検索で行が減るたびに窓の上端が動いて検索の欄が逃げる。上から一定の位置に留める */
+/* 一覧を見渡せる大きさにする。高さを固定し、収まる行の数でページを区切る */
+body[data-theme="glass"] .records { margin: auto; width: min(1080px, calc(100vw - 96px)); height: min(86vh, 1000px); max-height: none; padding: 22px 22px 18px; border: 0; border-radius: var(--r-4);
+  background: var(--light); color: var(--ink); box-shadow: var(--panel), var(--edge); font-family: var(--font-ui); overflow: hidden; display: none; }
+body[data-theme="glass"] .records[open] { display: flex; flex-direction: column; gap: 10px; }
+body[data-theme="glass"] .records::backdrop { background: oklch(0.42 0.06 265 / .22); backdrop-filter: blur(6px); }
+body[data-theme="glass"] .records[open] { animation: rec-in .45s var(--spring) both; }
+body[data-theme="glass"] .records[open]::backdrop { animation: rec-fade .2s ease-out both; }
+body[data-theme="glass"] .records.closing { animation: rec-out .14s ease-in both; }
+body[data-theme="glass"] .records.closing::backdrop { animation: rec-fade .14s ease-in reverse both; }
+@keyframes rec-in { from { opacity: 0; scale: .96; translate: 0 6px; } to { opacity: 1; scale: 1; translate: 0 0; } }
+@keyframes rec-out { from { opacity: 1; scale: 1; } to { opacity: 0; scale: .97; } }
+@keyframes rec-fade { from { opacity: 0; } to { opacity: 1; } }
+body[data-theme="glass"] .rec-head { display: flex; align-items: center; gap: 8px; }
+body[data-theme="glass"] .rec-head h2 { display: flex; align-items: center; gap: 8px; flex: 1; margin: 0; font-size: var(--fs-4); font-weight: 700; }
+body[data-theme="glass"] .rec-head h2 .ic svg { width: 20px; height: 20px; }
+body[data-theme="glass"] .rec-head .ibtn { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: var(--r-2); background: transparent; color: var(--ink-sub); cursor: pointer; }
+body[data-theme="glass"] .rec-head .ibtn:hover { background: var(--chip); color: var(--ink); }
+body[data-theme="glass"] .rec-head .ibtn .ic svg { width: 16px; height: 16px; }
+body[data-theme="glass"] .rec-q { padding: 9px 12px; border: 0; border-radius: var(--r-2); background: oklch(0.95 0.012 250); box-shadow: inset 0 1px 2px oklch(var(--shade-near) / .12); font: inherit; font-size: var(--fs-3); color: var(--ink); }
+/* フォーカスしたら濃紺の輪が外へバネで広がる。外すときは短く縮む */
+body[data-theme="glass"] .rec-q { outline: 0; transition: box-shadow .14s ease-in, background .2s; }
+body[data-theme="glass"] .rec-q:focus { background: oklch(0.97 0.010 250); box-shadow: inset 0 1px 2px oklch(var(--shade-near) / .08), 0 0 0 2px var(--navy), 0 0 0 5px oklch(0.29 0.044 267 / .07);
+  transition: box-shadow .45s var(--spring), background .2s; }
+body[data-theme="glass"] .rec-s { font-size: var(--fs-2); color: var(--ink-sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 当たった語の印。強調の色は文の選択のカードと揃えた淡い黄土の面に、字の色は本文のまま（ja-incremental-search.md の5節） */
+body[data-theme="glass"] .records mark { padding: 0 1px; border-radius: 3px; background: oklch(0.90 0.07 85); color: inherit; }
+body[data-theme="glass"] .rec-none { margin: 4px 2px; font-size: var(--fs-2); color: var(--ink-sub); }
+body[data-theme="glass"] .rec-none button { margin-left: 8px; padding: 4px 10px; border: 0; border-radius: var(--r-2); background: var(--chip); font: inherit; font-size: var(--fs-1); font-weight: 600; color: var(--ink); cursor: pointer; }
+body[data-theme="glass"] .rec-list { list-style: none; margin: 0 -8px; padding: 2px 8px; display: grid; align-content: start; gap: 0; overflow: hidden; flex: 1; min-height: 0; }
+body[data-theme="glass"] .rec { display: flex; align-items: center; gap: 8px; }
+body[data-theme="glass"] .rec-main { flex: 1; min-width: 0; display: grid; gap: 3px; padding: 10px 14px; border: 0; border-radius: var(--r-3); background: transparent; text-align: left; font: inherit; color: var(--ink); cursor: pointer; transition: background .15s; }
+/* ホバーの面は液体（liquid.js の pair・.rec-goo）が描くので、行そのものには付けない。行は液体より手前に置く */
+body[data-theme="glass"] .rec-list { position: relative; }   /* ページ送りにしたので一覧の中はスクロールしない */
+body[data-theme="glass"] .rec-goo { inset: 0; overflow: hidden; }   /* 一覧いっぱいに置く。行の端でバネが行き過ぎても一覧の外へはみ出させない */
+body[data-theme="glass"] .rec-main { z-index: 1; }   /* li に position を付けると行の offsetTop が 0 になり、液体の位置が測れない */
+body[data-theme="glass"] button.rec-main:focus-visible { outline: 0; }
+body[data-theme="glass"] button.rec-main:focus-visible { box-shadow: inset 0 0 0 2px var(--navy); }
+body[data-theme="glass"] .rec-main[aria-current="true"] { background: oklch(0.985 0.010 var(--light-h) / .9); box-shadow: var(--rim, var(--edge)), var(--lift); }
+body[data-theme="glass"] .rec-t { display: flex; align-items: baseline; gap: 8px; font-size: var(--fs-3); font-weight: 700; line-height: 1.5; }
+/* 今開いている文章の印。題の1行目の高さにそろえて行の右上に置き、題はその分だけ右を空ける。
+   形は選択中を表すチェック。字の札は長い題の横で2行に折れ、本文のアイコンは意図が伝わらなかった */
+body[data-theme="glass"] .rec-main { position: relative; }
+body[data-theme="glass"] .rec-main[aria-current="true"] .rec-t { padding-right: 30px; }
+body[data-theme="glass"] .rec-now { position: absolute; top: 12px; right: 12px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: var(--r-pill); background: var(--navy); }
+body[data-theme="glass"] .rec-now .ic { display: grid; width: 12px; height: 12px; color: var(--light); }
+body[data-theme="glass"] .rec-now .ic svg { width: 12px; height: 12px; display: block; }
+body[data-theme="glass"] .rec-p { flex: 1 1 0; min-width: 0; font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: var(--fs-1); color: oklch(0.62 0.02 255); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: right; }
+body[data-theme="glass"] .rec-m { display: flex; gap: 4px 12px; white-space: nowrap; font-size: var(--fs-1); color: var(--ink-sub); }
+body[data-theme="glass"] .rec-open { color: oklch(0.50 0.09 75); font-weight: 600; }
+body[data-theme="glass"] .rec.gone .rec-main { opacity: .7; cursor: default; }
+body[data-theme="glass"] .rec-forget { flex: none; padding: 6px 10px; border: 0; border-radius: var(--r-2); background: var(--chip); font: inherit; font-size: var(--fs-1); font-weight: 600; color: var(--ink); cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { body[data-theme="glass"] .records[open], body[data-theme="glass"] .records.closing { animation-duration: .01s; } }
+/* 要件定義書・設計書の項目と段落は文章構造とコメントの印を持たないので、文の左右の印の線を出さない。
+   --k が無く、選択とホバーのカードの上で白い線に見えていた */
+body[data-theme="glass"] .s.docitem::before, body[data-theme="glass"] .s.docitem::after { content: none; }
+
+/* 文詳細が開いているときに道具の欄の中へ出す説明カードは、ポインターを受けない。カードは乗せた行のすぐ下に重なるので、
+   受けると下の行へ移れなかった。
+   欄の外に出すカードは物に重ならないので、カードの上へ動かしても消えない作り（WCAG 1.4.13）のまま */
+body[data-theme="glass"] .hint.inside { pointer-events: none; }
+
+/* オープニング（web/opening.js）。最初の描画まで3枚のカードを隠し、地だけを見せる。隠したまま止まらないよう、opening.js が4秒で必ず外す */
+body[data-opening] .rail, body[data-opening] .side, body[data-opening] .desk { opacity: 0; }
+/* 中央から道具の欄へ飛ぶロゴの写し（沈み込みの img）。道具の欄のロゴと同じフィルターを当て、着いた所で同じ絵になるようにする */
+.op-ghost { position: fixed; z-index: 60; margin: 0; pointer-events: none; filter: url(#sink); transform-origin: 50% 50%; }
+/* 中央で組み上げる SVG は濃紺のまま（沈み込みを掛けない） */
+.op-ghost.op-solid { filter: none; }
+
+/* ライブラリのページ送り（imozuru のサイドバーと同じ形：‹ 2 / 4 ›・番号は打ち込める） */
+body[data-theme="glass"] .rec-pager { display: flex; align-items: center; justify-content: center; gap: 6px; padding-top: 4px; color: var(--ink-sub); font-variant-numeric: tabular-nums; }
+body[data-theme="glass"] .rec-pager.one { visibility: hidden; }
+body[data-theme="glass"] .rec-pager button { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-2); background: var(--chip); color: var(--ink); cursor: pointer; }
+body[data-theme="glass"] .rec-pager button:hover:not(:disabled) { background: oklch(0.90 0.02 250); }
+body[data-theme="glass"] .rec-pager button:disabled { opacity: .35; cursor: default; }
+body[data-theme="glass"] .rec-pager .ic { display: grid; place-items: center; }
+body[data-theme="glass"] .rec-pager .ic svg { width: 14px; height: 14px; display: block; }
+body[data-theme="glass"] .rec-pager .pg-n { width: 2.6em; height: 32px; padding: 0; border: 0; border-radius: var(--r-2); background: transparent; text-align: center; font: inherit; font-size: var(--fs-3); color: var(--ink); }
+body[data-theme="glass"] .rec-pager .pg-n:focus { outline: 0; background: oklch(0.95 0.012 250); box-shadow: 0 0 0 2px var(--navy); }
+body[data-theme="glass"] .rec-pager button:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+/* 行の区切りの線。行の間の上下 4px のすき間の真ん中に、文字の左右の端（14px 内側）まで引く。
+   色は灰色でなく本文の濃紺を薄くしたもの（光と影の色の原則 P1）。ページの頭の行には引かない（前のページの行は hidden なので、見えている行が前にあるときだけ）。
+   li に position を付けると行の offsetTop が測れなくなるので、線は li の背景で描く */
+body[data-theme="glass"] .rec-list > li { padding-block: 2px; }
+body[data-theme="glass"] .rec-list > li:not([hidden]) ~ li:not([hidden]) { background: linear-gradient(oklch(0.29 0.044 267 / .10), oklch(0.29 0.044 267 / .10)) 14px 0 / calc(100% - 28px) 1px no-repeat; }
+/* コメント一覧の「すべて・未解決」の切り替え。サイドバーの切り替えと同じ面（.legend・.key）を、欄の見出しの下に置く */
+body[data-theme="glass"] .cm-view { margin-bottom: 4px; }
+
+/* ライブラリの画面の切り替え（文章・テンプレート・校正辞書・プロンプト）。コメント一覧の「すべて・未解決」と同じ面（.legend・.key） */
+body[data-theme="glass"] .rec-view { margin: 2px 0 4px; }
+/* 同梱か自分のものか。題の横に小さな札で置く */
+body[data-theme="glass"] .rec-src { margin-left: auto; flex: none; padding: 0 8px; border-radius: var(--r-pill); background: var(--chip); font-size: var(--fs-1); font-weight: 600; color: var(--ink-sub); line-height: 20px; }
+body[data-theme="glass"] .rec-note { margin: 2px 2px 0; font-size: var(--fs-1); line-height: 1.7; color: var(--ink-sub); }
+body[data-theme="glass"] .rec-note code, body[data-theme="glass"] .dict code { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: .92em; padding: 0 4px; border-radius: 4px; background: var(--chip); }
+body[data-theme="glass"] .dict .rec-main { cursor: default; }
+body[data-theme="glass"] .dict .rec-t { align-items: center; flex-wrap: wrap; }
+body[data-theme="glass"] .dict-to { font-weight: 600; }
+/* テンプレートの中身。一覧の高さいっぱいに置き、中身だけをスクロールさせる（ページ送りの一覧は中でスクロールしないが、中身は1枚で読むため） */
+body[data-theme="glass"] .records:is([data-view="templates"], [data-view="prompts"]) .rec-list:has(.tpl-open) { display: flex; flex-direction: column; }
+body[data-theme="glass"] .tpl-open { flex: 1; align-self: stretch; width: 100%; box-sizing: border-box; min-height: 0; display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 4px 6px; }
+body[data-theme="glass"] .tpl-head { display: grid; gap: 4px; }
+body[data-theme="glass"] .tpl-head .rec-t { display: flex; align-items: baseline; }
+body[data-theme="glass"] .rec-back { justify-self: start; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px 4px 6px; border: 0; border-radius: var(--r-2); background: var(--chip); font: inherit; font-size: var(--fs-1); font-weight: 600; color: var(--ink); cursor: pointer; }
+body[data-theme="glass"] .rec-back .ic svg { width: 14px; height: 14px; display: block; }
+body[data-theme="glass"] .rec-back:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+body[data-theme="glass"] .tpl-body { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 12px 14px; border-radius: var(--r-3); background: oklch(0.985 0.006 var(--light-h) / .8); box-shadow: var(--edge);
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: var(--fs-1); line-height: 1.7; white-space: pre-wrap; color: var(--ink); }

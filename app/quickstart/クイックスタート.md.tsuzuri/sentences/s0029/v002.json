@@ -1,0 +1,22 @@
+{
+  "sid": "s0029",
+  "ver": "v002",
+  "text": "項目や段落にも文と同じようにコメントを残せます。",
+  "tags": {
+    "relation": "添加",
+    "importance": "核",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p5",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794963873526655271,
+  "written_at": 1794963873589361290,
+  "in": null
+}

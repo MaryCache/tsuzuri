@@ -1,0 +1,22 @@
+{
+  "sid": "s0013",
+  "ver": "v008",
+  "text": "異なると感じた文機能があれば、役割か重要度のラベル、または続く文で点線の下線が付いた語を押してから、どう異なるかを記入して Ctrl+Enter で送信してください。",
+  "tags": {
+    "relation": "添加",
+    "importance": "核",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p3",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794989030871683211,
+  "written_at": 1794989030940283511,
+  "in": null
+}

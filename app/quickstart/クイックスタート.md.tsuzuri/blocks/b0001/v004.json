@@ -1,0 +1,19 @@
+{
+  "sid": "b0001",
+  "ver": "v004",
+  "text": "本文のアイコンの見方",
+  "tags": {
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p2",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794989029509566847,
+  "written_at": 1794989029581841148,
+  "block": {
+    "kind": "heading",
+    "level": 2
+  }
+}

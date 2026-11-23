@@ -1,0 +1,7 @@
+*.tsuzuri/
+# 閲覧アプリを試すための見本の記録だけは残す（app/sample/make_sample.py で作り直せる）
+!app/sample/*.tsuzuri/
+# アプリに同梱するクイックスタートガイドの記録も残す（配布物。最初に開いたとき利用者の手元へ写して開く）
+!app/quickstart/*.tsuzuri/
+__pycache__/
+

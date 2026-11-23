@@ -1,0 +1,22 @@
+{
+  "sid": "s0003",
+  "ver": "v004",
+  "text": "この文章の文にもそれぞれ執筆意図と文機能が付いていて、文を選ぶと、右の詳細パネルに出る文詳細でその2つを読めます。",
+  "tags": {
+    "relation": "連鎖",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "2. 書く理由"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p1",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794977773370803998,
+  "written_at": 1794977773454027052,
+  "in": null
+}

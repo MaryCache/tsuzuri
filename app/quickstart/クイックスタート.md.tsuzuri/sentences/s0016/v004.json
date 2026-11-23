@@ -1,0 +1,22 @@
+{
+  "sid": "s0016",
+  "ver": "v004",
+  "text": "AI は何を誰のためになぜ執筆するかを定める要件定義書と、段落の順序を定める設計書を先に作成し、そのあとで一文ずつ執筆意図と文を執筆していきます。",
+  "tags": {
+    "relation": "連鎖",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p4",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794989031734715596,
+  "written_at": 1794989031800834987,
+  "in": null
+}

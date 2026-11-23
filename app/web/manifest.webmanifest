@@ -1,0 +1,17 @@
+{
+  "name": "tsuzuri",
+  "short_name": "tsuzuri",
+  "description": "一文ずつ執筆意図と文機能を付けて書いた文章を読む",
+  "lang": "ja",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#dde3ea",
+  "theme_color": "#dde3ea",
+  "icons": [
+    { "src": "/web/app-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/web/app-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/web/app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "sid": "s0010",
+  "ver": "v004",
+  "text": "文を押して選択すると詳細パネルに文詳細が開き、冒頭に、その文を執筆する前に決定した執筆意図が表示されます。",
+  "tags": {
+    "relation": "段落の始まり",
+    "importance": "核",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p3",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794989030484481423,
+  "written_at": 1794989030548678272,
+  "in": null
+}

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- 地の質感。ground-T2.png（GPT Image の見本）で測った2つの明暗を重ねる:
+       ・画面の3分の1ほどにかかる大きなゆらぎ（半径30のぼかしから平面を引いた残りで標準偏差 1.56/255・画面全体で測って 1.85）。斑が大きくなめらかなので周波数は低く、段は2つ
+       ・10〜50px ほどの細かい曇り（ぼかし半径 2〜48 の帯域で見本 0.39〜0.46/255・画面 0.37〜0.48）
+       見本の細かい粒（0.68/255）は足さない。地のグラデを重ねて8ビットに落とすだけで画面に約0.85の細かいむらが出て、粒を足すと見本より強くなったため。
+       色は持たず、0.5 の灰を中心にした明暗だけ。CSS の地の色に overlay で重ねる。傾きは画面で測って合わせた値 -->
+  <filter id="f" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feTurbulence type="fractalNoise" baseFrequency=".0022" numOctaves="2" seed="3" stitchTiles="stitch" result="d0"/>
+    <feColorMatrix in="d0" type="matrix" values="0 0 0 1 0  0 0 0 1 0  0 0 0 1 0  0 0 0 0 1" result="d1"/>
+    <feComponentTransfer in="d1" result="drift"><feFuncR type="linear" slope=".165" intercept=".4175"/><feFuncG type="linear" slope=".165" intercept=".4175"/><feFuncB type="linear" slope=".165" intercept=".4175"/></feComponentTransfer>
+    <feTurbulence type="fractalNoise" baseFrequency=".045" numOctaves="3" seed="21" stitchTiles="stitch" result="m0"/>
+    <feColorMatrix in="m0" type="matrix" values="0 0 0 1 0  0 0 0 1 0  0 0 0 1 0  0 0 0 0 1" result="m1"/>
+    <feComponentTransfer in="m1" result="mottle"><feFuncR type="linear" slope=".05" intercept=".475"/><feFuncG type="linear" slope=".05" intercept=".475"/><feFuncB type="linear" slope=".05" intercept=".475"/></feComponentTransfer>
+    <!-- 2つの明暗の差を足し合わせる（drift + mottle - 0.5） -->
+    <feComposite in="drift" in2="mottle" operator="arithmetic" k1="0" k2="1" k3="1" k4="-.5"/>
+  </filter>
+  <rect width="1024" height="1024" filter="url(#f)"/>
+</svg>

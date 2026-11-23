@@ -1,0 +1,22 @@
+{
+  "sid": "s0031",
+  "ver": "v002",
+  "text": "ライブラリでは文章のほかに、テンプレート・校正辞書・ほかのチャット AI に貼るプロンプトも切り替えて確認できます。",
+  "tags": {
+    "relation": "添加",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r004",
+  "design": "d003",
+  "para": "p5",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1795064366073288648,
+  "written_at": 1795064366158998646,
+  "in": null
+}

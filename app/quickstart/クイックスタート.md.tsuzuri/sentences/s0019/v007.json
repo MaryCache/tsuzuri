@@ -1,0 +1,22 @@
+{
+  "sid": "s0019",
+  "ver": "v007",
+  "text": "修正された箇所は、サイドバーの「変更」にある「差分だけ」を押すと、修正した文だけが並び、削除された字と追加された字を確認できます。",
+  "tags": {
+    "relation": "連鎖",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p4",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794989032350876916,
+  "written_at": 1794989032418435500,
+  "in": null
+}

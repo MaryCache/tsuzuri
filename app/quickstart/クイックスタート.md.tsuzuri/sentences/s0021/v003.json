@@ -1,0 +1,22 @@
+{
+  "sid": "s0021",
+  "ver": "v003",
+  "text": "アイコンバーの 3 と 4 では、その文章の要件定義書と設計書を読め、項目や段落を選ぶと、それを担う文が詳細パネルに並びます。",
+  "tags": {
+    "relation": "添加",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r001",
+  "design": "d001",
+  "para": "p5",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794945371023905379,
+  "written_at": 1794945371096766147,
+  "in": null
+}

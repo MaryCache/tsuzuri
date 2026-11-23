@@ -1,0 +1,22 @@
+{
+  "sid": "s0006",
+  "ver": "v001",
+  "text": "本文の文の左にある色の印は、その文の役割（主張・理由・根拠など）を示し、左の道具の欄の「文章構造」に同じ色で並んでいます。",
+  "tags": {
+    "relation": "転換",
+    "importance": "核",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r001",
+  "design": "d001",
+  "para": "p2",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794937219124867359,
+  "written_at": 1794937225839700948,
+  "in": null
+}

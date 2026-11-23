@@ -1,0 +1,19 @@
+{
+  "sid": "b0003",
+  "ver": "v002",
+  "text": "書いてもらい、直してもらう",
+  "tags": {
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p4",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794977774304969249,
+  "written_at": 1794977774380002167,
+  "block": {
+    "kind": "heading",
+    "level": 2
+  }
+}

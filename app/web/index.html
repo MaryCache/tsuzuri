@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tsuzuri</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/web/app-icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#dde3ea">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;600&family=BIZ+UDPGothic:wght@400;700&family=IBM+Plex+Sans+JP:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/web/app.css">
+<link rel="stylesheet" href="/web/theme-glass.css">
+<link rel="stylesheet" href="/web/texture.css">
+</head>
+<body data-paint="struct" data-struct="on" data-note="on" data-theme="glass" data-read="sans" data-opening="pending">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="goo" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur in="SourceGraphic" stdDeviation="5"/><feColorMatrix values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -12"/></filter>
+  <!-- ロゴの沈み込み: 道具のカードのすりガラスがロゴの形に削れ、底が見える（底はカードより暗い寒色）。光は上（P1 の暖色の白）から来るので、
+       穴の上の内壁は紫側の影、下の内壁と穴の下の縁は光を受ける。濃紺のまま沈める案と並べ、こちらを採った -->
+  <filter id="sink" x="-5%" y="-20%" width="110%" height="140%" color-interpolation-filters="sRGB">
+    <feFlood flood-color="oklch(0.855 0.030 248)"/><feComposite in2="SourceAlpha" operator="in" result="floor"/>
+    <feOffset in="SourceAlpha" dy="1.6" result="o1"/><feGaussianBlur in="o1" stdDeviation="0.9" result="b1"/><feComposite in="SourceAlpha" in2="b1" operator="out" result="topWall"/>
+    <feFlood flood-color="oklch(0.46 0.13 275)" flood-opacity="0.6"/><feComposite in2="topWall" operator="in" result="shade"/>
+    <feOffset in="SourceAlpha" dy="-1.1" result="o2"/><feGaussianBlur in="o2" stdDeviation="0.5" result="b2"/><feComposite in="SourceAlpha" in2="b2" operator="out" result="lowWall"/>
+    <feFlood flood-color="oklch(0.985 0.020 85)" flood-opacity="0.85"/><feComposite in2="lowWall" operator="in" result="lit"/>
+    <feOffset in="SourceAlpha" dy="1" result="o3"/><feComposite in="o3" in2="SourceAlpha" operator="out" result="lip"/>
+    <feFlood flood-color="oklch(0.985 0.020 85)" flood-opacity="0.9"/><feComposite in2="lip" operator="in" result="lipLit"/>
+    <feMerge><feMergeNode in="lipLit"/><feMergeNode in="floor"/><feMergeNode in="shade"/><feMergeNode in="lit"/></feMerge>
+  </filter></svg>
+<nav class="rail" aria-label="アイコンバー">
+  <button type="button" id="open-records" aria-haspopup="dialog" aria-label="ライブラリ" data-hint="ライブラリ" data-hint-kbd="0"><span class="ic" data-ic="library"></span><span class="kb kb-rail" aria-hidden="true">0</span></button>
+  <span class="rail-sep" aria-hidden="true"></span>
+  <button type="button" data-rail="requirements" aria-label="要件定義書" data-hint="要件定義書" data-hint-kbd="1"><span class="ic" data-ic="clipboard-list"></span><span class="kb kb-rail" aria-hidden="true">1</span></button>
+  <button type="button" data-rail="design" aria-label="設計書" data-hint="設計書" data-hint-kbd="2"><span class="ic" data-ic="design-doc"></span><span class="kb kb-rail" aria-hidden="true">2</span></button>
+  <button type="button" data-rail="detail" aria-label="本文" data-hint="本文" data-hint-kbd="3"><span class="ic" data-ic="book-open"></span><span class="kb kb-rail" aria-hidden="true">3</span></button>
+  <button type="button" data-rail="comments" aria-label="コメント一覧" data-hint="コメント一覧" data-hint-kbd="4"><span class="ic" data-ic="messages-square"></span><span class="kb kb-rail" aria-hidden="true">4</span></button>
+  <span class="sp"></span>
+  <button type="button" class="kb-toggle" id="kb-toggle" aria-pressed="false" aria-label="キーの案内" data-hint="キーの案内" data-hint-kbd="?"><span class="ic" data-ic="keyboard"></span><span class="kb kb-rail kb-always" aria-hidden="true">?</span></button>
+</nav>
+<aside class="side" aria-label="サイドバー">
+  <div class="brand"><span class="mark" aria-hidden="true">綴</span><img class="logo" src="/brand/tsuzuri-lockup.svg" alt="tsuzuri"></div>
+  <div class="doc"><h1 id="doc-name"></h1>
+    <div class="copy-wrap">
+      <button type="button" class="ibtn copy-btn" id="copy" aria-haspopup="menu" aria-expanded="false" aria-controls="copy-menu" aria-label="本文をコピー" data-hint="本文をコピー"><span class="ic" data-ic="copy"></span></button>
+      <div class="copy-menu pop" id="copy-menu" role="menu" hidden>
+        <div class="flavor" role="radiogroup" aria-label="出力する媒体の方言">
+          <button type="button" role="radio" data-flavor="gfm" aria-checked="true">GitHub</button>
+          <button type="button" role="radio" data-flavor="qiita" aria-checked="false">Qiita</button>
+          <button type="button" role="radio" data-flavor="zenn" aria-checked="false">Zenn</button>
+        </div>
+        <button type="button" role="menuitem" data-copy="all">記事全部<span class="sub">frontmatter つき</span></button>
+        <button type="button" role="menuitem" data-copy="body">本文だけ<span class="sub">frontmatter を除外</span></button>
+      </div>
+    </div></div>
+  <section class="sec" data-sec="struct"><h2 class="label"><span class="ic" data-ic="list-tree"></span>文章構造<span class="side-hint"><span class="vh">本文の左のアイコン</span><svg class="pict" viewBox="0 0 32 20" aria-hidden="true"><g class="pict-lines"><rect x="7" y="3" width="23" height="2.4" rx="1.2"/><rect x="7" y="8.8" width="23" height="2.4" rx="1.2"/><rect x="7" y="14.6" width="15" height="2.4" rx="1.2"/></g><rect class="pict-bar" x="1.5" y="2.4" width="3" height="15.2" rx="1.5"/></svg></span></h2><div class="legend" id="legend-struct"></div></section>
+  <section class="sec" data-sec="note"><h2 class="label"><span class="ic" data-ic="message-square"></span>コメント<span class="side-hint"><span class="vh">本文の右のアイコン</span><svg class="pict" viewBox="0 0 32 20" aria-hidden="true"><g class="pict-lines"><rect x="2" y="3" width="23" height="2.4" rx="1.2"/><rect x="2" y="8.8" width="23" height="2.4" rx="1.2"/><rect x="2" y="14.6" width="15" height="2.4" rx="1.2"/></g><rect class="pict-bar" x="27.5" y="2.4" width="3" height="15.2" rx="1.5"/></svg></span></h2><div class="legend" id="legend-note"></div></section>
+  <section class="sec sec-imp"><h2 class="label"><span class="ic" data-ic="circle-dot"></span>重要度<span class="mode-toggle" role="group" aria-label="重要度の見方"><button type="button" class="mbtn" data-imp-mode="mark" aria-pressed="true" aria-label="ハイライト" data-hint="ハイライト：押した重要度の文を濃く残し、ほかの文を薄くする"><span class="ic" data-ic="diff-mark"></span></button><button type="button" class="mbtn" data-imp-mode="only" aria-pressed="false" aria-label="フィルター" data-hint="フィルター：押した重要度の文だけを本文に残し、ほかの文を外す"><span class="ic" data-ic="diff-only"></span></button></span></h2><div class="legend" id="legend-imp"></div></section>
+  <section class="sec sec-diff"><h2 class="label"><span class="ic" data-ic="diff"></span>変更<span class="mode-toggle" role="group" aria-label="変更の見方"><button type="button" class="mbtn" data-diff-mode="mark" aria-pressed="true" aria-label="ハイライト" data-hint="ハイライト：変更した文と字に色を付けて、本文の中で示す"><span class="ic" data-ic="diff-mark"></span></button><button type="button" class="mbtn" data-diff-mode="only" aria-pressed="false" aria-label="フィルター" data-hint="フィルター：変更した文だけを並べ、削除と追加の字を示す"><span class="ic" data-ic="diff-only"></span></button></span></h2>
+    <div class="round-menu pop" id="round-menu" role="menu" aria-label="起点の回" hidden><div class="pop-list" id="round-list"></div></div>
+    <div class="legend" id="legend-diff"></div></section>
+  <section class="sec"><div class="label"><span class="ic" data-ic="pilcrow"></span>段落目次</div><ol class="toc" id="toc"></ol></section>
+  <nav class="nav" aria-label="一覧">
+    <button type="button" class="nbtn" data-panel="comments"><span class="ic" data-ic="messages-square"></span>コメント一覧<span class="n" id="n-open"></span></button>
+    <button type="button" class="nbtn" data-panel="requirements"><span class="ic" data-ic="clipboard-list"></span>要件定義書</button>
+    <button type="button" class="nbtn" data-panel="design"><span class="ic" data-ic="design-doc"></span>設計書</button>
+    <span class="nbtn problems" id="problems" hidden><span class="ic" data-ic="flag"></span>記録の問題<span class="n" id="n-problems"></span></span>
+  </nav>
+</aside>
+<main class="desk" id="desk">
+  <div class="set">
+    <article class="paper" id="paper" aria-label="本文"><canvas class="grain" id="grain" aria-hidden="true"></canvas><div class="text" id="text"></div></article>
+    <aside class="detail" id="detail" aria-label="文詳細" tabindex="-1"></aside>
+  </div>
+</main>
+<dialog class="records" id="records" aria-labelledby="records-title">
+  <div class="rec-head"><h2 id="records-title"><span class="ic" data-ic="library"></span>ライブラリ</h2>
+    <button type="button" class="ibtn" id="rec-import" aria-label="共有ファイルを開く" data-hint="共有ファイルを開く（.tsz）"><span class="ic" data-ic="tsz-open"></span></button>
+    <input type="file" id="rec-import-file" accept=".tsz" hidden>
+    <button type="button" class="ibtn" id="records-close" aria-label="閉じる" data-hint="閉じる" data-hint-kbd="Esc"><span class="ic" data-ic="x"></span></button></div>
+  <div class="legend rec-view" id="rec-view" role="group" aria-label="一覧の表示"></div>
+  <input class="rec-q" id="rec-q" type="search" autocomplete="off" spellcheck="false" aria-label="文章を検索" aria-controls="rec-list" placeholder="タイトル・依頼・本文から探す">
+  <ul class="rec-list" id="rec-list"></ul>
+  <p class="rec-none" id="rec-none" role="status" hidden></p>
+  <p class="rec-note" id="rec-note" hidden></p>
+  <nav class="rec-pager one" id="rec-pager" aria-label="ライブラリのページ"><button type="button" data-rec-page="-1" aria-label="前のページ" data-hint="前のページ" data-hint-kbd="PgUp"><span class="ic" data-ic="chevron-left"></span></button>
+    <input class="pg-n" id="rec-pg-n" type="text" inputmode="numeric" autocomplete="off" aria-label="ページ番号" value="1"><span class="pg-t">/ <span id="rec-pg-t">1</span></span>
+    <button type="button" data-rec-page="1" aria-label="次のページ" data-hint="次のページ" data-hint-kbd="PgDn"><span class="ic" data-ic="chevron-right"></span></button></nav>
+</dialog>
+<div class="hint" id="hint" role="tooltip" popover="manual" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/web/tex.js"></script>
+<script src="/web/motion.js"></script>
+<script src="/web/opening.js"></script>
+<script src="/web/app.js"></script>
+<script src="/web/hint.js"></script>
+<script src="/web/liquid.js"></script>
+</body>
+</html>

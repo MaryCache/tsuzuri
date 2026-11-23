@@ -1,0 +1,19 @@
+{
+  "sid": "b0004",
+  "ver": "v003",
+  "text": "ほかの文章と文書の切り替え",
+  "tags": {
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p5",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794989032549650886,
+  "written_at": 1794989032616826772,
+  "block": {
+    "kind": "heading",
+    "level": 2
+  }
+}

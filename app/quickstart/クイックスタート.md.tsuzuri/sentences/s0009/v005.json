@@ -1,0 +1,22 @@
+{
+  "sid": "s0009",
+  "ver": "v005",
+  "text": "字が少し太い文は重要度が「核」の文で、削除すると言いたいことが失われます。",
+  "tags": {
+    "relation": "添加",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r002",
+  "design": "d002",
+  "para": "p2",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1794989030099297227,
+  "written_at": 1794989030164337573,
+  "in": null
+}

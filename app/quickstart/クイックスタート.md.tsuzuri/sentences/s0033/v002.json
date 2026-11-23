@@ -1,0 +1,22 @@
+{
+  "sid": "s0033",
+  "ver": "v002",
+  "text": "工夫はその文で使った文章の技法、対応要件はその文が担う要件定義書の項目を指します。",
+  "tags": {
+    "relation": "補足",
+    "importance": "衛星",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "4. 範囲と範囲外"
+  },
+  "requirements": "r004",
+  "design": "d003",
+  "para": "p3",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1795064955714432715,
+  "written_at": 1795064955806635846,
+  "in": null
+}
