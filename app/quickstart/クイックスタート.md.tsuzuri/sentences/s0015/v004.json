@@ -1,0 +1,23 @@
+{
+  "sid": "s0015",
+  "ver": "v004",
+  "text": "自分の文章の執筆を依頼する際は、Claude Code や Codex などの AI コーディングエージェントで「tsuzuri で書いて」と依頼します。",
+  "tags": {
+    "relation": "転換",
+    "importance": "核",
+    "role": [
+      "解説"
+    ],
+    "technique": [],
+    "place": "6. 読んだあと"
+  },
+  "requirements": "r005",
+  "design": "d004",
+  "para": "p4",
+  "deviation": null,
+  "source": "ai",
+  "memo_at": 1795465661225512143,
+  "written_at": 1795465661312860929,
+  "in": null,
+  "title": "依頼先を複数エージェント対応へ変更"
+}

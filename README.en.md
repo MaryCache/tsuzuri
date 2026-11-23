@@ -7,7 +7,7 @@
 
 日本語版は [README.md](README.md) にあります。
 
-tsuzuri is a Claude Code skill and a viewer app for improving the quality of Japanese text written by AI.
+tsuzuri is a skill for AI coding agents (such as Claude Code, Codex, and Antigravity) and a viewer app for improving the quality of Japanese text written by AI.
 Before writing each sentence, the AI records what the sentence should do for the reader as its writing intent (執筆意図), and after writing it, the AI tags the sentence with its sentence functions (文機能): labels such as its role, its connection to the previous sentence, and its importance.
 In the viewer app, you read each sentence together with its writing intent and sentence functions, leave comments on sentences that drift from what you meant, and ask the AI to revise them.
 
@@ -30,7 +30,7 @@ Because the writing intent and sentence functions have already laid out what eac
 
 ## What happens when you write with tsuzuri
 
-When you ask Claude Code to "write with tsuzuri" (tsuzuri で書いて), the AI works in this order:
+When you ask your AI coding agent to "write with tsuzuri" (tsuzuri で書いて), the AI works in this order:
 
 1. It writes a requirements document (要件定義書) that decides what to write, for whom and why, what to cover and what to leave out, and what the reader should be able to do afterward.
 2. It writes a design document (設計書) that decides the claim and order of each paragraph.
@@ -45,14 +45,14 @@ If you ask it to stop after the requirements or the design, the AI stops there, 
 ## Reading and asking for revisions in the viewer app
 
 Open the finished text in the viewer app and select a sentence; its writing intent and sentence functions appear in the detail panel (詳細パネル) on the right.
-If a sentence looks wrong, leave a comment on it and ask Claude Code to "read the tsuzuri comments and revise" (tsuzuri のコメントを読んで直して); the AI then revises the sentence and adds it as a new version.
+If a sentence looks wrong, leave a comment on it and ask your AI coding agent to "read the tsuzuri comments and revise" (tsuzuri のコメントを読んで直して); the AI then revises the sentence and adds it as a new version.
 
 Each new version gets a one-line title saying what was changed, which appears in the version history when you select the sentence.
 The earlier version stays in the record (see "Where the record is kept, and git"), so you can check the difference in the app.
 
 ## Reading text written by people or other AIs
 
-Text written by a person or by another AI can be read with tsuzuri too: ask Claude Code to "read this with tsuzuri" (tsuzuri で読んで), and the AI tags it with sentence functions one sentence at a time.
+Text written by a person or by another AI can be read with tsuzuri too: ask your AI coding agent to "read this with tsuzuri" (tsuzuri で読んで), and the AI tags it with sentence functions one sentence at a time.
 Such text has no writing intent from its author, so the AI adds one it infers from the sentence and its context, and the app marks it as inferred.
 
 When it reads text that you or someone else wrote, the AI also reviews it and points out weak sentences, and you can ask it to revise them.
@@ -61,7 +61,7 @@ It does not revise them on its own, though; for text you are in a position to re
 To read a wordy AI-written article with less effort, choose the filter (フィルター) to the right of the importance (重要度) heading in the sidebar and press nucleus (核, the sentences whose removal would lose the main point): only those sentences remain, so you can follow the main line.
 
 For text written by another chat AI, open the library (ライブラリ, the screen that switches between texts, templates, the proofreading dictionary and prompts; the 0 key) in the app, switch to prompts (プロンプト), copy the prompt that asks the AI to write out how it wrote the text, and send it in the conversation where that text was written.
-Give the answer to Claude Code together with the text, and the AI records writing intents from the writing AI's own account rather than from guesses.
+Give the answer to your AI coding agent together with the text, and it records writing intents from the writing AI's own account rather than from guesses.
 
 ## Templates and the proofreading dictionary
 
@@ -87,7 +87,7 @@ You can browse your templates and proofreading dictionary, and read their conten
 
 ## Installation
 
-You need Claude Code, Python 3.10 or later, and yomiyasu, plus Node.js (for npx) and git to install the skills and clone the repository.
+You need a skills-compatible AI coding agent (such as Claude Code, Codex, or Antigravity), Python 3.10 or later, and yomiyasu, plus Node.js (for npx) and git to install the skills and clone the repository.
 Install the skills with these commands:
 
 ```bash
@@ -105,7 +105,7 @@ python3 tsuzuri/app/server.py
 Open the address it prints in your browser; on first launch, the app opens a quick start guide in Japanese, itself written with tsuzuri.
 To open a record folder (the `<file name>.tsuzuri` folder described in "Where the record is kept, and git") that is not in your library, pass it, as in `python3 tsuzuri/app/server.py <file name>.tsuzuri`; `--port` changes the port (8770 by default).
 
-To try it on your own text, tell Claude Code what you want to write and for whom, and ask it to write with tsuzuri; the result appears in the app's library (ライブラリ, the 0 key).
+To try it on your own text, tell your AI coding agent what you want to write and for whom, and ask it to write with tsuzuri; the result appears in the app's library (ライブラリ, the 0 key).
 
 ## Where the record is kept, and git
 
@@ -118,7 +118,7 @@ To keep your writing intents and comments without publishing them, back up the r
 
 ## Sharing a record
 
-To share a record, ask Claude Code to "pack this text's record into a shared file" (この文章の記録を共有ファイルにまとめて); the record and the text are packed into one shared file (`.tsz`).
+To share a record, ask your AI coding agent to "pack this text's record into a shared file" (この文章の記録を共有ファイルにまとめて); the record and the text are packed into one shared file (`.tsz`).
 The recipient opens it with the open-shared-file button (共有ファイルを開く) to the right of the library heading in the app, or by dragging the file onto the library.
 
 A shared file also contains your writing intents and comments, so check that they are fine to share before you send it.
