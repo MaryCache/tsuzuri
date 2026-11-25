@@ -1,6 +1,7 @@
 """閲覧アプリのサーバー（app/server.py）の試験。見本の記録を一時フォルダに写して読み書きする。"""
 
 import base64
+import contextlib
 import http.client
 import io
 import json
@@ -345,6 +346,48 @@ class HttpTest(unittest.TestCase):
         for flavor in server.T.FLAVORS:
             self.assertEqual(self._status(self.base + "/api/markdown?flavor=" + flavor), 200)
 
+    def test_markdown_returns_full_text_and_body_without_meta(self):
+        """全文（markdown）と、付帯情報を除いた本文だけ（body）を返す。付帯情報が無い記録では2つが一致する。"""
+        for flavor in server.T.FLAVORS:
+            with self.subTest(flavor=flavor, meta=False), request_url(self.base + "/api/markdown?flavor=" + flavor) as response:
+                data = json.load(response)
+                self.assertEqual(set(data), {"markdown", "body"})
+                self.assertEqual(data["markdown"], data["body"])
+        work = Path(tempfile.mkdtemp(dir=self.tmp))
+        self.addCleanup(shutil.rmtree, work, ignore_errors=True)
+        root = work / "構想.md.tsuzuri"
+        shutil.copytree(SAMPLE, root)
+        (root / "meta").mkdir()
+        (root / "meta" / "m001.md").write_text("title: 付帯情報の試験\n", encoding="utf-8")
+        with patch.object(server.Handler, "root", root):
+            for flavor in server.T.FLAVORS:
+                with self.subTest(flavor=flavor, meta=True), request_url(self.base + "/api/markdown?flavor=" + flavor) as response:
+                    data = json.load(response)
+                    # 付帯情報は全文にだけ入り、本文だけには入らない（画面が正規表現で剥がさずに済むようにする）
+                    self.assertIn("付帯情報の試験", data["markdown"])
+                    self.assertNotIn("付帯情報の試験", data["body"])
+                    self.assertLess(len(data["body"]), len(data["markdown"]))
+
+    def test_responses_carry_same_origin_resource_policy(self):
+        """他サイトの <img> などから /api/image や API を読ませないため、成功・失敗・画像のどの応答にも付ける。"""
+        for path in ("/", "/api/doc", "/api/markdown?flavor=gfm", "/api/image?src=missing.png", "/nothing"):
+            with self.subTest(path=path):
+                try:
+                    with request_url(self.base + path) as response:
+                        headers = response.headers
+                except urllib.error.HTTPError as error:
+                    headers = error.headers
+                self.assertEqual(headers["Cross-Origin-Resource-Policy"], "same-origin")
+
+    def test_markdown_flavor_error_follows_the_flavor_list(self):
+        """断る文言の方言名は T.FLAVORS から組み、方言を足したときに古い一覧を出さない。"""
+        for flavors in (server.T.FLAVORS, (*server.T.FLAVORS, "note")):
+            with self.subTest(flavors=flavors), patch.object(server.T, "FLAVORS", flavors):
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    request_url(self.base + "/api/markdown?flavor=bad")
+                self.assertEqual(caught.exception.code, 400)
+                self.assertEqual(json.load(caught.exception)["error"], f"記法は {'・'.join(flavors)} から選択してください")
+
     def test_stale_tab_cannot_post_change_or_delete_other_record(self):
         """文章を切り替えたあと、同じ文ID・コメントIDへの古い画面からの3操作を409で断る。"""
         def post(path, body):
@@ -470,11 +513,225 @@ class HttpTest(unittest.TestCase):
                     self.assertEqual(response.read(), png)
                     self.assertEqual(response.headers["Content-Type"], "image/png")
                     self.assertIn("sandbox", response.headers["Content-Security-Policy"])
-                for bad in ("../o.png", "/etc/hostname", "img/../img/logo.png", ".secret/a.png", "link.png", "dir-link/o.png",
+                # 許可範囲の中へ畳める ".." と "." は通し、範囲の外へ出る ".." は、あとで戻る形でも断る
+                for good in ("img/../img/logo.png", "./img/logo.png", "img/./logo.png", "img//logo.png"):
+                    with self.subTest(mode=mode, src=good):
+                        self.assertEqual(self._status(self.base + "/api/image?src=" + urllib.parse.quote(good)), 200)
+                for bad in ("../o.png", "img/../../o.png", f"img/../../{self.tmp.name}/img/logo.png", "img/../.secret/a.png", "..",
+                            "img/..", "/etc/hostname", ".secret/a.png", "link.png", "dir-link/o.png",
                             "notes.txt", "https://example.com/a.png", "img\\logo.png", "img/missing.png", "",
                             "img/C:logo.png", "notes.txt:x.png", "con.png", "img/logo.png.", "fifo.png", "big.png"):
                     with self.subTest(mode=mode, src=bad):
                         self.assertEqual(self._status(self.base + "/api/image?src=" + urllib.parse.quote(bad)), 404)
+
+    # 画像の許可範囲の試験で使う。記述子で1段ずつ開く経路と、それができない環境（Windows）の経路の両方を回す
+    PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 16
+
+    def _modes(self):
+        """(経路の名前, supports_dir_fd) の組。パスの経路は dir_fd を使えない環境を真似る。"""
+        return (("記述子", os.supports_dir_fd), ("パス", set()))
+
+    def _image_status(self, root, src, image_root=None):
+        """root を開いた状態で /api/image を呼び、状態コードを返す。"""
+        with patch.object(server.Handler, "root", root), patch.object(server.Handler, "image_root", image_root):
+            return self._status(self.base + "/api/image?src=" + urllib.parse.quote(src))
+
+    def _make_repo(self, git_as_file=False):
+        """git のルートの下に docs/sub の文書と、外へ出る罠を置き、(作業場所, リポジトリ, 記録) を返す。"""
+        work = Path(tempfile.mkdtemp(dir=self.tmp))
+        self.addCleanup(shutil.rmtree, work, ignore_errors=True)
+        repo = work / "repo"
+        root = repo / "docs" / "sub" / "hogehoge.md.tsuzuri"
+        shutil.copytree(SAMPLE, root)
+        # worktree の .git はフォルダでなくファイル
+        if git_as_file:
+            (repo / ".git").write_text("gitdir: /elsewhere/worktrees/x\n", encoding="utf-8")
+        else:
+            (repo / ".git").mkdir()
+        # 文書は docs/sub なので、../images は docs/images、../../images はリポジトリ直下の images を指す
+        for images in (repo / "docs" / "images", repo / "images"):
+            images.mkdir()
+            (images / "image.png").write_bytes(self.PNG)
+        (repo / "docs" / "sub" / "near.png").write_bytes(self.PNG)
+        (repo / "docs" / ".hidden").mkdir()
+        (repo / "docs" / ".hidden" / "a.png").write_bytes(self.PNG)
+        (work / "outside.png").write_bytes(self.PNG)
+        outside = work / "outside-dir"
+        outside.mkdir()
+        (outside / "o.png").write_bytes(self.PNG)
+        (repo / "docs" / "images" / "link-to-outside.png").symlink_to(work / "outside.png")
+        (repo / "docs" / "images" / "linkdir").symlink_to(outside, target_is_directory=True)
+        return work, repo, root
+
+    def test_image_parent_path_is_served_inside_the_git_root(self):
+        """.git のフォルダでもファイルでも、git のルートの中なら ../ で上の画像フォルダを指せる。"""
+        for git_as_file in (False, True):
+            _, repo, root = self._make_repo(git_as_file)
+            for mode, dir_fd in self._modes():
+                with patch.object(server.os, "supports_dir_fd", dir_fd):
+                    for src in ("../images/image.png", "../../images/image.png", "near.png", "../sub/near.png"):
+                        with self.subTest(mode=mode, git_as_file=git_as_file, src=src):
+                            self.assertEqual(self._image_status(root, src), 200)
+                    with self.subTest(mode=mode, git_as_file=git_as_file, check="body"):
+                        with patch.object(server.Handler, "root", root), request_url(self.base + "/api/image?src=" + urllib.parse.quote("../images/image.png")) as response:
+                            self.assertEqual(response.read(), self.PNG)
+
+    def test_image_cannot_leave_the_git_root_or_follow_hidden_and_links(self):
+        """git のルートより外・隠しフォルダ・外へ向かうリンクは、上の画像フォルダを許しても断る。"""
+        _, repo, root = self._make_repo()
+        for mode, dir_fd in self._modes():
+            with patch.object(server.os, "supports_dir_fd", dir_fd):
+                for src in ("../../../outside.png", "../../../../outside.png", "../../../outside-dir/o.png",
+                            "../.hidden/a.png", "../images/link-to-outside.png", "../images/linkdir/o.png",
+                            "../images/../.hidden/a.png", "../../.git/config.png", "../images/missing.png",
+                            # 一度範囲の外へ出てから、名前で範囲の中へ戻る形も断る
+                            f"../../../{repo.parent.name}/repo/docs/images/image.png", "../.."):
+                    with self.subTest(mode=mode, src=src):
+                        self.assertEqual(self._image_status(root, src), 404)
+
+    def test_received_record_stays_beside_its_document(self):
+        """受け取った記録は、親に .git があっても --image-root があっても、文書のフォルダの外の画像を読ませない。"""
+        _, repo, root = self._make_repo()
+        order = json.loads((root / "order.json").read_text(encoding="utf-8"))
+        (root / "order.json").write_text(json.dumps({**order, "received": True}, ensure_ascii=False), encoding="utf-8")
+        # received/ の下に置いた記録は、order.json に印が無くても受け取ったものとして扱う
+        received = self.tmp / "received"
+        made_received = not received.exists()
+        folder = received / "受領-画像の試験"
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        if made_received:
+            self.addCleanup(lambda: received.rmdir() if received.is_dir() and not any(received.iterdir()) else None)
+        (folder / ".git").mkdir(parents=True)
+        (folder / "images").mkdir()
+        (folder / "images" / "image.png").write_bytes(self.PNG)
+        (folder / "docs").mkdir()
+        (folder / "docs" / "near.png").write_bytes(self.PNG)
+        by_path = folder / "docs" / "doc.md.tsuzuri"
+        shutil.copytree(SAMPLE, by_path)
+        for label, target, near in (("印", root, "near.png"), ("置き場", by_path, "near.png")):
+            location = repo / "docs" / "sub" if target == root else folder / "docs"
+            for mode, dir_fd in self._modes():
+                with patch.object(server.os, "supports_dir_fd", dir_fd):
+                    for image_root in (None, repo if target == root else folder):
+                        with self.subTest(mode=mode, by=label, image_root=image_root):
+                            self.assertEqual(self._image_status(target, "../images/image.png", image_root), 404)
+                            self.assertEqual(self._image_status(target, near, image_root), 200)
+            self.assertEqual(server._image_boundary(target, location.parent), location.resolve())
+        # order.json が読めない記録も、安全側で受け取ったものとして扱う
+        (root / "order.json").write_text("{", encoding="utf-8")
+        self.assertEqual(server._image_boundary(root, repo), root.parent.resolve())
+
+    def test_image_root_widens_the_range_without_git(self):
+        """git が無いフォルダでも --image-root を指定すればその範囲の ../ を通し、その外は断る。"""
+        work = Path(tempfile.mkdtemp(dir=self.tmp))
+        self.addCleanup(shutil.rmtree, work, ignore_errors=True)
+        project = work / "project"
+        root = project / "docs" / "doc.md.tsuzuri"
+        shutil.copytree(SAMPLE, root)
+        (project / "images").mkdir()
+        (project / "images" / "image.png").write_bytes(self.PNG)
+        (work / "outside.png").write_bytes(self.PNG)
+        unrelated = work / "unrelated"
+        unrelated.mkdir()
+        for mode, dir_fd in self._modes():
+            with patch.object(server.os, "supports_dir_fd", dir_fd):
+                with self.subTest(mode=mode):
+                    self.assertEqual(self._image_status(root, "../images/image.png", project), 200)
+                    self.assertEqual(self._image_status(root, "../../outside.png", project), 404)
+                    # 指定が無ければ従来どおり文書のフォルダに閉じる
+                    self.assertEqual(self._image_status(root, "../images/image.png"), 404)
+                    # 文書を含まない指定は使わず、文書のフォルダに閉じる
+                    self.assertEqual(self._image_status(root, "../images/image.png", unrelated), 404)
+
+    def test_image_boundary_decisions(self):
+        """許可範囲は、受け取った記録＞明示指定＞git のルート＞文書のフォルダの順で決まり、ホームと根は広げない。"""
+        work, repo, root = self._make_repo()
+        doc_dir = root.parent.resolve()
+        self.assertEqual(server._image_boundary(root), repo.resolve())
+        # 文書を含む指定はそれを使い、含まない指定と、根・ホームの指定は文書のフォルダに閉じる
+        self.assertEqual(server._image_boundary(root, repo / "docs"), (repo / "docs").resolve())
+        self.assertEqual(server._image_boundary(root, work / "elsewhere"), doc_dir)
+        self.assertEqual(server._image_boundary(root, Path("/")), doc_dir)
+        self.assertEqual(server._image_boundary(root, self.tmp), doc_dir)
+        # ホームに .git があっても、ホーム全体を範囲にしない
+        (self.tmp / ".git").mkdir()
+        self.addCleanup(shutil.rmtree, self.tmp / ".git", ignore_errors=True)
+        bare = work / "bare" / "doc.md.tsuzuri"
+        shutil.copytree(SAMPLE, bare)
+        self.assertEqual(server._image_boundary(bare), bare.parent.resolve())
+        # git が無ければ文書のフォルダ（fail-closed）
+        self.assertEqual(server._image_boundary(self.root), self.root.parent.resolve())
+
+    def test_too_broad_rejects_home_ancestors_config_and_mounts(self):
+        """根・ホーム・ホームの祖先・設定の保存先・マウントポイントは、画像の許可範囲にするには広すぎる。"""
+        home = Path(tempfile.mkdtemp(dir=self.tmp)).resolve()
+        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
+        (home / ".config" / "tsuzuri").mkdir(parents=True)
+        (home / "project").mkdir()
+        xdg = home / "xdg-config"
+        xdg.mkdir()
+        with patch.dict(os.environ, {"HOME": str(home), "XDG_CONFIG_HOME": str(xdg)}):
+            for broad in (Path("/"), home, home.parent, home / ".config", xdg):
+                with self.subTest(broad=str(broad)):
+                    self.assertTrue(server._too_broad(broad))
+            # ホームの下の普通のフォルダと、設定の下の個別の保存先は、範囲にしてよい
+            for narrow in (home / "project", home / ".config" / "tsuzuri"):
+                with self.subTest(narrow=str(narrow)):
+                    self.assertFalse(server._too_broad(narrow))
+            with patch.object(server.os.path, "ismount", side_effect=lambda path: path == str(home / "project")):
+                self.assertTrue(server._too_broad(home / "project"))
+
+    def test_git_root_in_config_or_home_ancestor_is_not_used_as_boundary(self):
+        """~/.config/.git があっても、サンプルの記録から ~/.config 全体を許可範囲にしない。"""
+        home = Path(tempfile.mkdtemp(dir=self.tmp)).resolve()
+        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
+        root = home / ".config" / "tsuzuri" / "samples" / "quickstart" / "doc.md.tsuzuri"
+        shutil.copytree(SAMPLE, root)
+        (home / ".config" / ".git").mkdir()
+        (home / ".config" / "secret.png").write_bytes(self.PNG)
+        (home.parent / ".git").mkdir(exist_ok=True)
+        self.addCleanup(shutil.rmtree, home.parent / ".git", ignore_errors=True)
+        with patch.dict(os.environ, {"HOME": str(home), "XDG_CONFIG_HOME": ""}):
+            self.assertEqual(server._image_boundary(root), root.parent.resolve())
+            self.assertEqual(server._image_boundary(root, home / ".config"), root.parent.resolve())
+            for mode, dir_fd in self._modes():
+                with patch.object(server.os, "supports_dir_fd", dir_fd), self.subTest(mode=mode):
+                    self.assertEqual(self._image_status(root, "../../../../secret.png"), 404)
+
+    def test_image_boundary_replaced_by_a_symlink_is_refused(self):
+        """許可範囲を決めたあとに範囲そのものがリンクへ差し替わっても、辿らずに断る（記述子の経路）。"""
+        if not (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY") and os.open in os.supports_dir_fd):
+            self.skipTest("この環境では記述子で1段ずつ開けない")
+        work = Path(tempfile.mkdtemp(dir=self.tmp)).resolve()
+        self.addCleanup(shutil.rmtree, work, ignore_errors=True)
+        real = work / "real"
+        (real / "doc.md.tsuzuri").parent.mkdir(parents=True)
+        shutil.copytree(SAMPLE, real / "doc.md.tsuzuri")
+        (real / "image.png").write_bytes(self.PNG)
+        link = work / "link"
+        link.symlink_to(real, target_is_directory=True)
+        root = real / "doc.md.tsuzuri"
+        self.assertEqual(server.document_image(root, "image.png")[0], self.PNG)
+        with patch.object(server, "_image_boundary", return_value=link), \
+                patch.object(server, "_descend_from_boundary", return_value=(["image.png"], 0)):
+            with self.assertRaises((ValueError, OSError)):
+                server.document_image(root, "image.png")
+
+    def test_image_rejects_control_and_format_characters(self):
+        """双方向制御などの制御・書式文字を含む名前は断り、結合絵文字の ZWJ と異体字セレクタは正当な名前として通す。"""
+        _, repo, root = self._make_repo()
+        (repo / "docs" / "images" / "a\u200db.png").write_bytes(self.PNG)
+        (repo / "docs" / "images" / "\u2764\ufe0f.png").write_bytes(self.PNG)
+        (repo / "docs" / "images" / "evil\u202egnp.png").write_bytes(self.PNG)
+        for mode, dir_fd in self._modes():
+            with patch.object(server.os, "supports_dir_fd", dir_fd):
+                for src in ("../images/a\u200db.png", "../images/\u2764\ufe0f.png"):
+                    with self.subTest(mode=mode, src=src):
+                        self.assertEqual(self._image_status(root, src), 200)
+                for src in ("../images/evil\u202egnp.png", "../images/\u202eimage.png", "../images/image\u2066.png",
+                            "../images/ima\x07ge.png", "../images/ima\x1bge.png", "../images/\u200bimage.png"):
+                    with self.subTest(mode=mode, src=src):
+                        self.assertEqual(self._image_status(root, src), 404)
 
     def test_doc_and_page_are_served(self):
         self.assertEqual(self._status(self.base + "/"), 200)
@@ -617,6 +874,16 @@ class RecordsTest(unittest.TestCase):
         self.assertEqual([c for c in server.load_document(self.root)["comments"] if c.get("doc")][0]["addressed_by"], "r003")
         self.assertEqual(server.set_status(self.root, made["id"], "open")["reopened_at_ver"], "r003")
         self.assertEqual([c for c in server.load_document(self.root)["comments"] if c.get("doc")][0]["status"], "open")
+
+    def test_main_validates_image_root_before_serving(self):
+        """--image-root は存在するフォルダだけを受け付け、根・ホーム・ファイルと、略称での指定は起動前に断る。"""
+        (self.tmp / "file.txt").write_text("x", encoding="utf-8")
+        for args in (["--image-root", str(self.tmp / "無い")], ["--image-root", str(self.tmp / "file.txt")],
+                     ["--image-root", "/"], ["--image-root", str(self.tmp)], ["--image", str(self.tmp / "sub")]):
+            with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    server.main(args)
+                self.assertEqual(caught.exception.code, 2)
 
     def test_server_without_record_starts_from_the_list(self):
         server.Handler.root = None

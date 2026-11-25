@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """tsuzuri の記録フォルダを読み、閲覧アプリを 127.0.0.1 で配るサーバー。
 
-使い方: python3 app/server.py [<文書の名前>.tsuzuri] [--port 8770]（記録を省くと、ライブラリから始まる）
+使い方: python3 app/server.py [<文書の名前>.tsuzuri] [--port 8770] [--image-root <dir>]（記録を省くと、ライブラリから始まる）
 
 記録の読み方はスキルのスクリプト（skills/tsuzuri/scripts/tsuzuri.py）の関数をそのまま使い、
 読み方を2つに持たない。アプリが書くのは comments/ だけ（ADR-0001 の「書き手を分ける」）。
@@ -24,6 +24,7 @@ from pathlib import Path, PurePosixPath
 import sys
 import threading
 import time
+import unicodedata
 import urllib.parse
 import zipfile
 
@@ -32,14 +33,14 @@ sys.path.insert(0, str(HERE.parent / "skills" / "tsuzuri" / "scripts"))
 import tsuzuri as T  # noqa: E402  スキルのスクリプトを読み方の正本として使う
 
 WEB = HERE / "web"
-# 配る静的ファイルの置き場。ここ以外は配らない（パスの外へ出る指定を止めるため）
+# 配る静的ファイルの保存先。ここ以外は配らない（パスの外へ出る指定を止めるため）
 STATIC_ROOTS = {"/web/": WEB, "/icons/": HERE / "icons", "/brand/": HERE.parent / "assets" / "brand" / "logo"}
 # 書込の宛先に使える働きの項目。画面の「違う」から来る名前だけを受け付ける
 TARGETS = {"役割", "接続", "重要度", "工夫", "対応要件"}
 # 1件の書込の上限。画面では上限を見せない（textarea.md）が、壊れた送信で巨大なファイルを作らないための守り
 MAX_TEXT = 20000
 # 画面から受け取る .tsz の上限（圧縮した大きさ）。記録は文字ばかりで、数百の文でも数百KBに収まる。
-# 送信は base64 の JSON なので、受け取る長さはこの約4/3倍になる
+# 送信は base64 の JSON のため、受け取る長さはこの約4/3倍になる
 MAX_TSZ = 30 * 1024 * 1024
 # 書込のファイル名を決めて書くまでを1つずつにする（同じ番号を2つの要求が取らないため）
 WRITE_LOCK = threading.Lock()
@@ -135,18 +136,18 @@ def _request_of(root):
 def record_summary(path):
     """ライブラリの1行分（題・場所・依頼・最後に書いた時刻・文の数・未解決のコメントの数）と、検索に使う本文。
 
-    一覧には動かしたり消したりした記録も残っているので、読めないものは exists を false にして返し、画面で外せるようにする。
-    本文は最新の文をつないだもの。一覧は数十件の想定なので、まとめて返して画面の側で絞る。
+    一覧には動かしたり消したりした記録も残っているため、読めないものは exists を false にして返し、画面で外せるようにする。
+    本文は最新の文をつないだもの。一覧は数十件の想定のため、まとめて返して画面の側で絞る。
     """
     root = Path(path)
-    # 文書の名前は draft.md のように重なりやすいので、置いてあるフォルダの名前を前に付けて見分ける
+    # 文書の名前は draft.md のように重なりやすいため、置いてあるフォルダの名前を前に付けて見分ける
     document = root.name[:-len(".tsuzuri")] if root.name.endswith(".tsuzuri") else root.name
     summary = {"path": str(root), "name": f"{root.parent.name}/{document}"}
     try:
         order = T._order(root)
         meta = T._meta(root) or ""
         title = next((line.split(":", 1)[1].strip().strip("'\"") for line in meta.splitlines() if line.startswith("title:")), "")
-        # 書くたびに増えるファイルの置き場の更新時刻を見る（全ファイルを開くと記録が大きいとき一覧が遅くなる）
+        # 書くたびに増えるファイルの保存先の更新時刻を見る（全ファイルを開くと記録が大きいとき一覧が遅くなる）
         stamps = [p.stat().st_mtime for p in (root / "order.json", root / "sentences", root / "blocks", root / "comments",
                                              root / "requirements", root / "design") if p.exists()]
         stamps += [p.stat().st_mtime for p in (root / "sentences").iterdir() if p.is_dir()] if (root / "sentences").is_dir() else []
@@ -161,7 +162,7 @@ def record_summary(path):
 def record_stamp(root):
     """各フォルダの名前と更新時刻から、時計が戻っても変化を識別できる値を返す。
 
-    保存は一時ファイルからの置き換えなので、ファイルを開かず置き場の更新時刻で変更を拾える。
+    保存は一時ファイルからの置き換えのため、ファイルを開かず保存先の更新時刻で変更を拾える。
     """
     stamps = [(".", root.stat().st_mtime_ns)]
     for folder, subfolders, _files in os.walk(root):
@@ -172,9 +173,9 @@ def record_stamp(root):
 
 
 def open_record(path):
-    """画面で選んだかパスを入れた記録を確かめ、一覧に足して開く記録フォルダを返す。
+    """画面で選んだかパスを入れた記録を確認し、一覧に足して開く記録フォルダを返す。
 
-    人は記録フォルダより文書のパスを覚えているので、文書（draft.md）のパスを入れても隣の draft.md.tsuzuri を開く。
+    人は記録フォルダより文書のパスを覚えているため、文書（draft.md）のパスを入れても隣の draft.md.tsuzuri を開く。
     """
     if not isinstance(path, str) or not path.strip():
         raise ValueError("文章のパスを指定してください")
@@ -213,7 +214,7 @@ def add_comment(root, body):
     if to is not None and to not in TARGETS:
         raise ValueError(f"宛先は文機能の項目名にしてください: {to}")
     with WRITE_LOCK:
-        # コメントの無い記録を git で配ると comments/ ごと無くなる（空のフォルダは追跡されない）ので、最初の1件で作る
+        # コメントの無い記録を git で配ると comments/ ごと無くなる（空のフォルダは追跡されない）ため、最初の1件で作る
         (root / "comments").mkdir(exist_ok=True)
         cid = T._next_name(root / "comments", "c", 4, ".json")
         comment = {"id": cid, **target, "to": to, "text": text,
@@ -227,7 +228,7 @@ def add_comment(root, body):
 def set_status(root, cid, status):
     """書込の状態（open・resolved）を書き換えて返す。
 
-    書込はアプリだけが書くので、同じファイルを書き直してよい（ADR-0001）。
+    書込はアプリだけが書くため、同じファイルを書き直してよい（ADR-0001）。
     書込の ID か状態が不正なとき、ファイルが無いときは ValueError か OSError。
     """
     T._identifier(cid, "c", 4)
@@ -252,7 +253,7 @@ def set_status(root, cid, status):
 def delete_comment(root, cid):
     """書込を1件、ファイルごと消して、消した中身を返す（打ち間違いを消せるようにするため）。
 
-    書込はアプリだけが書くので、消してよい（ADR-0001）。次の番号は一番大きい番号の次なので、間の番号を消しても重ならない。
+    書込はアプリだけが書くため、消してよい（ADR-0001）。次の番号は一番大きい番号の次のため、間の番号を消しても重ならない。
     書込の ID が不正なとき、ファイルが無いときは ValueError か OSError。
     """
     T._identifier(cid, "c", 4)
@@ -268,6 +269,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # いま開いている記録。記録を渡さずに起動したときは None で、画面はライブラリから始まる
     root: Path | None = None
+    # --image-root で明示した画像の許可範囲。None なら git のルートか文書のフォルダから決める（_image_boundary）
+    image_root: Path | None = None
 
     def log_message(self, format, *args):  # 要求ごとの記録は出さない（端末を静かに保つ）
         pass
@@ -279,6 +282,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        # 他サイトの <img> や <script> から /api/image などを読み込ませない。応答の成否の差で画像の存在を探られるのを防ぐ
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         # 画面は自分の出どころの資源だけを読む。字形だけ Google Fonts から読む
         self.send_header("Content-Security-Policy", csp or "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; script-src 'self'")
         self.end_headers()
@@ -308,7 +313,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(WEB / "index.html")
         if path == "/tokens.css":
             return self._file(HERE / "tokens.css")
-        # アプリとして入れるための manifest と service worker。worker は置いた場所より上を受け持てないので、根から配る
+        # アプリとして入れるための manifest と service worker。worker は置いた場所より上を受け持てないため、根から配る
         if path == "/manifest.webmanifest":
             return self._send(200, (WEB / "manifest.webmanifest").read_bytes(), "application/manifest+json; charset=utf-8")
         if path == "/sw.js":
@@ -321,7 +326,7 @@ class Handler(BaseHTTPRequestHandler):
             # 最近書いた記録を上に。読めない記録は下にまとめる
             rows.sort(key=lambda r: (r["exists"], r.get("updated", 0)), reverse=True)
             return self._send(200, {"current": str(root) if root else None, "records": rows})
-        # テンプレートと校正辞書は利用者ごとに育つ設定で、どの記録にも属さないので、記録を開く前から見せる。
+        # テンプレートと校正辞書は利用者ごとに育つ設定で、どの記録にも属さないため、記録を開く前から見せる。
         # アプリは見せるだけで、書き換えは AI か利用者がファイルで行う（アプリが書く先はコメントだけのまま）
         if path == "/api/templates":
             try:
@@ -371,18 +376,21 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/image":
             src = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("src", [""])[0]
             try:
-                data, kind = document_image(root, src)
+                data, kind = document_image(root, src, self.image_root)
             except (ValueError, OSError) as error:
                 return self._send(404, {"error": str(error)})
             return self._send(200, data, kind, csp=IMAGE_CSP)
         if path == "/api/markdown":
-            # 本文コピー用。export と同じ記事の Markdown を返し、text.md は書き換えない
-            # 方言（gfm・qiita・zenn）は ?flavor= で受け取る。書き出す媒体ごとに注記の箱の書き方だけが変わる
+            # 本文コピー用。export と同じ記事の Markdown（markdown）に加え、付帯情報を除いた本文だけ（body）も返し、text.md は書き換えない
+            # body を別に持つのは、画面が「本文だけコピー」で付帯情報（先頭の YAML など）を正規表現で剥がさずに済むようにするため
+            # 方言（T.FLAVORS）は ?flavor= で受け取る。書き出す媒体ごとに記法が変わる
             flavor = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True).get("flavor", ["gfm"])[0]
             if flavor not in T.FLAVORS:
-                return self._send(400, {"error": "記法は gfm・qiita・zenn から選択してください"})
+                # 方言の一覧は T.FLAVORS が正本のため、文言も一覧から組み、媒体を足してもここを直さずに済ませる
+                return self._send(400, {"error": f"記法は {'・'.join(T.FLAVORS)} から選択してください"})
             try:
-                return self._send(200, {"markdown": T._article(root, T._order(root), flavor)})
+                order = T._order(root)
+                return self._send(200, {"markdown": T._article(root, order, flavor), "body": T._article(root, order, flavor, include_meta=False)})
             except (ValueError, OSError, KeyError) as error:
                 return self._send(500, {"error": str(error)})
         # 要件定義書は r001、設計書は d001 の形だけを通し、パスの外へ出させない
@@ -401,7 +409,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "見つかりません"})
 
     def do_POST(self):
-        """送信元・長さ・表示中の文章を確かめ、コメントまたはライブラリを更新する。"""
+        """送信元・長さ・表示中の文章を確認し、コメントまたはライブラリを更新する。"""
         if not self._local_host():
             return
         # 手元の外の Web ページから書き込ませない。同じ出どころからの JSON の送信だけを受け付ける
@@ -446,7 +454,7 @@ class Handler(BaseHTTPRequestHandler):
                 parts = path.strip("/").split("/")
                 if len(parts) == 4 and parts[:2] == ["api", "comments"] and parts[3] == "status":
                     return self._send(200, set_status(root, parts[2], body.get("status")))
-                # 消すのも同じ出どころの確かめを通したいので、DELETE でなく POST で受ける
+                # 消すのも同じ出どころの確認を通したいため、DELETE でなく POST で受ける
                 if len(parts) == 4 and parts[:2] == ["api", "comments"] and parts[3] == "delete":
                     return self._send(200, delete_comment(root, parts[2]))
                 return self._send(404, {"error": "見つかりません"})
@@ -455,7 +463,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 # 文章の画像のブロックが指す画像。本文の Markdown や HTML が文書のフォルダからの相対パスで指す画像を、閲覧アプリでも描くために返す。
-# 返すのは、記録の隣（文書と同じフォルダ）より下の画像の拡張子のファイルだけ。文書のフォルダには README のように
+# 返すのは、許可範囲（_image_boundary）より下の画像の拡張子のファイルだけ。文書のフォルダには README のように
 # リポジトリ全体が入るため、範囲を画像に絞り、隠しファイルとリンクをたどる道は拒む
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
                ".webp": "image/webp", ".svg": "image/svg+xml", ".avif": "image/avif"}
@@ -468,20 +476,130 @@ IMAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
 _WINDOWS_SPECIAL = re.compile(r"^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$)(?:\..*)?$|[. ]$", re.I)
 # 画像を同時に読む数の上限。画像の多い文章を開いても、サーバーが一度に大きなファイルを読み込み続けないようにする
 _IMAGE_READS = threading.BoundedSemaphore(4)
+# 制御文字と書式文字（双方向制御・ゼロ幅など）は、見た目と実体のずれを作るため断る。
+# ただし結合絵文字の ZWJ と異体字セレクタは、正当なファイル名に入るため通す
+_ALLOWED_FORMAT_CHARS = {"\u200d", "\ufe0e", "\ufe0f"}
+
+
+def _home():
+    """利用者のホーム（解決済み）。決められない環境では None。"""
+    try:
+        return Path.home().resolve()
+    except (RuntimeError, OSError):
+        return None
+
+
+def _config_dirs(home):
+    """利用者の設定の保存先（解決済み）。XDG_CONFIG_HOME と $HOME/.config の両方を返す。"""
+    found = []
+    for candidate in (os.environ.get("XDG_CONFIG_HOME"), home / ".config" if home else None):
+        if not candidate:
+            continue
+        try:
+            found.append(Path(candidate).expanduser().resolve())
+        except (RuntimeError, OSError):
+            continue
+    return found
+
+
+def _too_broad(directory):
+    """画像の許可範囲にするには広すぎる場所か。
+
+    根・ホーム・ホームの祖先（/home など）・設定の保存先・マウントポイントを断る。
+    ~/.config 自体が git 管理されている環境で、サンプルの記録（~/.config/tsuzuri/samples）から
+    設定全体が画像の許可範囲になるのを防ぐため。マウントポイントは別のボリュームの根を丸ごと開く入口になる。
+    """
+    if directory == Path(directory.anchor):
+        return True
+    home = _home()
+    if home is not None and (directory == home or directory in home.parents):
+        return True
+    if directory in _config_dirs(home):
+        return True
+    return os.path.ismount(str(directory))
+
+
+def _is_received(root):
+    """root が外部から受け取った .tsz の記録か。読めない order.json は、安全側で受け取ったものとして扱う。"""
+    try:
+        if T._order(root).get("received"):
+            return True
+    except (ValueError, OSError, KeyError, TypeError):
+        return True
+    received = (T.registry_path().parent / "received").resolve()
+    return root.resolve().is_relative_to(received)
+
+
+def _find_git_root(start):
+    """start から親へ辿り、最初に .git（フォルダか、worktree のファイル）がある階層を返す。見つからなければ None。
+
+    ホームや根まで出たら打ち切る。ホームの dotfiles 管理などで $HOME/.git があっても、
+    ホーム全体を画像の読める範囲にしないため。
+    """
+    for directory in (start, *start.parents):
+        if _too_broad(directory):
+            return None
+        if (directory / ".git").exists():
+            return directory
+    return None
+
+
+def _image_boundary(root, image_root=None):
+    """記録 root の文書が指せる画像の許可範囲（解決済みのフォルダ）を返す。
+
+    受け取った記録は、悪意のある共有ファイルから上のフォルダの画像を読ませないため、
+    何を指定されても文書のフォルダに閉じる。手元の記録は、--image-root があればそこ（文書のフォルダを含むときだけ）、
+    なければ git のルートまで広げる。docs/ に文書を置いて ../images/ の画像を指す書き方は、リポジトリでよく使うため。
+    決められないときは文書のフォルダに閉じる（許可を広げる側へは倒さない）。
+    """
+    doc_dir = root.parent.resolve()
+    if _is_received(root):
+        return doc_dir
+    if image_root is not None:
+        candidate = Path(image_root).resolve()
+        # 文書を含まない指定や、根・ホームのような広すぎる指定は、無関係なフォルダを開く入口になるため使わない
+        if doc_dir.is_relative_to(candidate) and not _too_broad(candidate):
+            return candidate
+        return doc_dir
+    return _find_git_root(doc_dir) or doc_dir
 
 
 def _image_parts(src):
-    """src を検査して、文書のフォルダから辿る名前の並びと画像の種類を返す。"""
+    """src の入口を検査して、"/" で分けた名前の並び（".." を含みうる）と画像の種類を返す。"""
     # ":" は Windows のドライブ指定と NTFS の代替データストリームになるため、どこにあっても断る。分け方は OS によらず "/" だけにする
     if not src or len(src) > 1024 or any(c in src for c in "\\\0:") or src.startswith("/"):
         raise ValueError("文書のフォルダからの相対パスだけを開けます")
-    parts = PurePosixPath(src).parts
-    if not parts or any(part in ("..", ".") or part.startswith(".") or _WINDOWS_SPECIAL.search(part) for part in parts):
-        raise ValueError("上のフォルダ・隠しファイル・特別な名前は開けません")
+    if any(unicodedata.category(c) in ("Cc", "Cf") and c not in _ALLOWED_FORMAT_CHARS for c in src):
+        raise ValueError("制御文字を含む名前は開けません")
     kind = IMAGE_TYPES.get(PurePosixPath(src).suffix.lower())
     if kind is None:
         raise ValueError("画像のファイルではありません")
-    return parts, kind
+    return src.split("/"), kind
+
+
+def _descend_from_boundary(parts, doc_dir, boundary):
+    """文書のフォルダから parts を字面でたどり、許可範囲からの下りだけの名前の並びと、文書のフォルダ由来の先頭の数を返す。
+
+    ".." は OS に渡さず、ここで字面のまま畳む。途中で一度でも許可範囲の外へ出る指定は、あとで戻ってきても断る。
+    畳んだ結果だけを開くため、途中のリンクの先や差し替えで範囲の外へ出る道がなくなる。
+    """
+    # (名前, src が足した名前か)。文書のフォルダ自身の保存先が隠しフォルダでも、文書が置かれているだけのため断らない
+    stack = [(name, False) for name in doc_dir.relative_to(boundary).parts]
+    for name in parts:
+        if name in ("", "."):
+            continue
+        if name == "..":
+            if not stack:
+                raise ValueError("画像の置ける範囲の外は開けません")
+            stack.pop()
+            continue
+        if name.startswith(".") or _WINDOWS_SPECIAL.search(name):
+            raise ValueError("隠しファイル・特別な名前は開けません")
+        stack.append((name, True))
+    if not stack or not stack[-1][1]:
+        raise ValueError("画像のファイルではありません")
+    kept = next((i for i, (_, added) in enumerate(stack) if added), len(stack))
+    return [name for name, _ in stack], kept
 
 
 def _read_regular(fd):
@@ -500,41 +618,48 @@ def _read_regular(fd):
     return bytes(data)
 
 
-def document_image(root, src):
+def document_image(root, src, image_root=None):
     """記録 root の文書のフォルダから相対パス src の画像を (バイト列, 種類) で返す。範囲の外・画像でない・大きすぎるものは ValueError。
 
-    確認と読み込みの間にファイルをリンクへ差し替えられないよう、名前を1段ずつリンクをたどらずに開き、開いた記述子で種類と大きさを確かめて読む。
-    その開き方ができない環境（Windows）では、パスで確かめたうえで、実体の場所・隠しファイル・拡張子をもう一度確かめる。
+    範囲は _image_boundary が決める。src の ".." は字面で畳み、許可範囲からの下りだけの名前にしてから開く。
+    確認と読み込みの間にファイルをリンクへ差し替えられないよう、許可範囲を開いて名前を1段ずつリンクをたどらずに開き、開いた記述子で種類と大きさを確認して読む。
+    その開き方ができない環境（Windows）では、パスで確認したうえで、実体の場所・隠しファイル・拡張子をもう一度確認する。
     """
     parts, kind = _image_parts(src)
-    base = root.parent.resolve()
+    doc_dir = root.parent.resolve()
+    boundary = _image_boundary(root, image_root)
+    rel_parts, kept = _descend_from_boundary(parts, doc_dir, boundary)
+    if IMAGE_TYPES.get(PurePosixPath(rel_parts[-1]).suffix.lower()) != kind:
+        raise ValueError("画像のファイルではありません")
     if not _IMAGE_READS.acquire(timeout=10):
         raise ValueError("画像の読み込みが混んでいます")
     try:
         if os.open in os.supports_dir_fd and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"):
-            fds = [os.open(base, os.O_RDONLY | os.O_DIRECTORY)]
+            # 範囲そのものも、決めたあとにリンクへ差し替えられた場合に辿らない（解決済みの実フォルダなら必ず開ける）
+            fds = [os.open(boundary, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)]
             try:
-                for name in parts[:-1]:
+                for name in rel_parts[:-1]:
                     fds.append(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fds[-1]))
                 try:
-                    fds.append(os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0), dir_fd=fds[-1]))
+                    fds.append(os.open(rel_parts[-1], os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0), dir_fd=fds[-1]))
                 except OSError as error:
                     raise ValueError("画像が見つからないか、リンクになっています") from error
                 return _read_regular(fds[-1]), kind
             finally:
                 for fd in reversed(fds):
                     os.close(fd)
-        target = base.joinpath(*parts)
+        target = boundary.joinpath(*rel_parts)
         for step in [target, *target.parents]:
-            if step == base:
+            if step == boundary:
                 break
             if step.is_symlink() or getattr(step, "is_junction", lambda: False)():
                 raise ValueError("リンクになった画像は開けません")
         real = target.resolve()
-        if not real.is_relative_to(base) or real == base:
+        if not real.is_relative_to(boundary) or real == boundary:
             raise ValueError("画像が見つかりません")
-        inside = real.relative_to(base).parts
-        if any(part.startswith(".") for part in inside) or IMAGE_TYPES.get(real.suffix.lower()) != kind:
+        inside = real.relative_to(boundary).parts
+        # 先頭 kept 個は文書のフォルダの保存先のため、隠しフォルダでも断らない（fd 経路と同じ扱い）
+        if any(part.startswith(".") for part in inside[kept:]) or IMAGE_TYPES.get(real.suffix.lower()) != kind:
             raise ValueError("画像が見つかりません")
         fd = os.open(real, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0))
         try:
@@ -575,10 +700,10 @@ def prompt_rows():
 
 
 def unpack_received(name, data):
-    """画面で選んだ .tsz（base64）を、受け取った記録の置き場に展開して開き、記録フォルダを返す。
+    """画面で選んだ .tsz（base64）を、受け取った記録の保存先に展開して開き、記録フォルダを返す。
 
-    ブラウザはファイルの場所を渡せないので、中身を受け取って展開する。展開の検査は CLI の unpack と同じものを通す。
-    置き場は ~/.config/tsuzuri/received/<ファイル名>/ で、同じ名前を2度受け取ったら -2, -3 と分ける
+    ブラウザはファイルの場所を渡せないため、中身を受け取って展開する。展開の検査は CLI の unpack と同じものを通す。
+    保存先は ~/.config/tsuzuri/received/<ファイル名>/ で、同じ名前を2度受け取ったら -2, -3 と分ける
     （unpack は既存の名前に書かないため、前に受け取った記録とそのコメントを上書きしない）。
     """
     if not isinstance(name, str) or not name.endswith(".tsz") or not isinstance(data, str):
@@ -589,7 +714,7 @@ def unpack_received(name, data):
         raise ValueError("ファイルを読み込めませんでした") from error
     if len(raw) > MAX_TSZ:
         raise ValueError("ファイルが大きすぎます")
-    # 名前はフォルダ名にだけ使う。区切りや先頭の点を除き、利用者の置き場の外を指せないようにする
+    # 名前はフォルダ名にだけ使う。区切りや先頭の点を除き、利用者の保存先の外を指せないようにする
     stem = re.sub(r"[^\w\-]+", "_", Path(name).stem).strip("._") or "received"
     base = T.registry_path().parent / "received"
     target = base / stem
@@ -600,7 +725,7 @@ def unpack_received(name, data):
     try:
         root = T.unpack_archive(io.BytesIO(raw), target)
     except (ValueError, OSError, zipfile.BadZipFile) as error:
-        # 拒んだときは何も残さない（unpack は検査を終えてから書くが、作った置き場は消す）
+        # 拒んだときは何も残さない（unpack は検査を終えてから書くが、作った保存先は消す）
         shutil.rmtree(target, ignore_errors=True)
         raise ValueError(f"共有用のファイルを開けませんでした: {error}") from error
     return open_record(str(root))
@@ -610,8 +735,8 @@ def first_run_sample():
     """初めて開いた人に、同梱のクイックスタートガイドを写して開く記録フォルダを返す。初めてでなければ None。
 
     初めてかどうかはライブラリのファイルがあるかで決める。一覧から見本を外した人に、開くたび写し直さないため。
-    配布物の中をそのまま開くと、書いたコメントが配布物に入って更新のときにぶつかるので、
-    一覧と同じ置き場（~/.config/tsuzuri/samples/）へ写してから開く。
+    配布物の中をそのまま開くと、書いたコメントが配布物に入って更新のときにぶつかるため、
+    一覧と同じ保存先（~/.config/tsuzuri/samples/）へ写してから開く。
     すでに写しがあれば、書いたコメントを消さないよう写し直さずにそれを開く。
     """
     if T.registry_path().exists():
@@ -631,11 +756,20 @@ def first_run_sample():
 
 
 def main(argv=None):
-    """記録フォルダを確かめてから、閲覧アプリを配る。"""
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    """記録フォルダを確認してから、閲覧アプリを配る。"""
+    # 略称を許すと、将来の引数の追加で既存の呼び出しが別の意味になるため
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("record", nargs="?", help="記録フォルダ（<文書の名前>.tsuzuri）。省くと、ライブラリから始まる")
     parser.add_argument("--port", type=int, default=8770)
+    parser.add_argument("--image-root", help="文書が ../ で指せる画像の範囲にするフォルダ。省くと git のルート（無ければ文書のフォルダ）。受け取った記録には効かない")
     args = parser.parse_args(argv)
+    if args.image_root is not None:
+        image_root = Path(args.image_root).expanduser().resolve()
+        if not image_root.is_dir():
+            parser.error(f"--image-root は存在するフォルダを指定してください: {image_root}")
+        if _too_broad(image_root):
+            parser.error(f"--image-root にファイルシステムの根やホームは指定できません: {image_root}")
+        Handler.image_root = image_root
     if args.record:
         Handler.root = open_record(args.record)  # 壊れた記録なら、配る前に理由を出して止める
     else:

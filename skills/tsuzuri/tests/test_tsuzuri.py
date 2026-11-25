@@ -4,9 +4,11 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 import zipfile
@@ -1710,6 +1712,621 @@ getattr(cli, sys.argv[2])(sys.argv[3])
                 self.assertEqual(tsuzuri._doc_comment(self.root, comment)["status"], "resolved" if number == 4 else "open")
                 legacy = {k: v for k, v in comment.items() if k != "posted_latest"}
                 self.assertEqual(tsuzuri._doc_comment(self.root, legacy)["status"], "resolved")
+
+
+    # ---- 全角のカンマ・ピリオド（，．）の検査 ----
+
+    def test_norm_punct_changes_only_the_inspection_copy(self):
+        """全角のカンマとピリオドだけを句読点へそろえ、文字数は変えない。記録の本文は書き換えない。"""
+        self.assertEqual(tsuzuri._norm_punct("a，b．c、d。，．"), "a、b。c、d。、。")
+        self.assertEqual(tsuzuri._norm_punct(""), "")
+        self.assertEqual(tsuzuri._norm_punct("コンマ,ピリオド."), "コンマ,ピリオド.")
+        self.sentence("読点が，多くて，長くて，読みにくい文．")
+        self.cli("load", self.root)
+        self.assertEqual(self.load("sentences/s0001/v001.json")["text"], "読点が，多くて，長くて，読みにくい文．")
+
+    def test_load_counts_fullwidth_commas_in_long_and_comma_heavy_sentences(self):
+        """読点の数は「，」も「、」と同じに数える。2つまでは挙げず、混ざっていても3つ以上なら挙げる。"""
+        self.sentence("あ" * 61 + "，い，い，い．")
+        self.sentence("読点が，多くて，長くて，読みにくい文．")
+        self.sentence("読点は，二つ，だけです．")
+        self.sentence("一、二，三、四．")
+        out = self.cli("load", self.root).stdout
+        long_section = out.split("## 長い文")[1].split("\n## ")[0]
+        self.assertIn("s0001 68字 読点 3", long_section)
+        heavy = out.split("## 読点の多い文")[1].split("\n## ")[0]
+        self.assertIn("s0001 読点 3", heavy)
+        self.assertIn("s0002 読点 3", heavy)
+        self.assertIn("s0004 読点 3", heavy)
+        self.assertNotIn("s0003", heavy)
+
+    def test_connectives_find_fullwidth_comma_and_keep_the_users_character(self):
+        """接続語は「，」でも見つけ、返す語と位置は元の文のまま（「ても，」）で、一覧のスニペットにも「，」が残る。"""
+        text = "文章が意図からずれていても，どこでずれたかは分かりません．"
+        found = tsuzuri._connectives(text)
+        self.assertEqual([(kind, word) for kind, word, _ in found], [("逆接・譲歩", "ても，")])
+        kind, word, start = found[0]
+        self.assertEqual(text[start:start + len(word)], "ても，")
+        self.assertEqual([(kind, word) for kind, word, _ in tsuzuri._connectives("そのため，先に書かせます．")], [("順接・理由", "そのため")])
+        self.assertEqual(tsuzuri._connectives("そのため先に書かせます．"), [("順接・理由", "そのため", 0)])
+        self.sentence(text)
+        section = self.cli("load", self.root).stdout.split("## 接続の確認")[1]
+        self.assertIn("逆接・譲歩「ても，」", section)
+
+    def test_load_finds_actor_shift_with_fullwidth_punctuation(self):
+        """動作を連ねて条件で受け、最後に別の主語を出す文は、「，」「．」で書いても挙げる。条件だけでつなぐ文は挙げない。"""
+        self.sentence("書き上がった文章は閲覧アプリで開き，文を選ぶと，その文の執筆意図と文機能が右の詳細パネルに出ます．")
+        self.sentence("書き上がった文章を閲覧アプリで開いて文を選ぶと，その文の執筆意図と文機能が右の詳細パネルに出ます．")
+        section = self.cli("load", self.root).stdout.split("## 途中で変わる動作主")[1].split("##")[0]
+        self.assertIn("s0001 書き上がった文章は閲覧アプリで開き，", section)
+        self.assertNotIn("s0002", section)
+
+    def test_load_repeats_use_fullwidth_punctuation_and_keep_found_words(self):
+        """くり返す名詞は「，」を含む文でも探し、挙げる語は元の文から切り出す。「，」を含む主題は主題として拾わない。"""
+        self.sentence("項目や段落を選ぶと，その項目や段落を担う文が並びます．")
+        self.sentence("要件，設計は先に決めます．")
+        self.sentence("要件，設計は文に付けます．")
+        self.sentence("tsuzuri は，執筆意図を書かせます．")
+        self.sentence("tsuzuri は，文機能を付けさせます．")
+        section = self.cli("load", self.root).stdout.split("## くり返す名詞")[1].split("##")[0]
+        self.assertIn("s0001 並べた語を「その」で受け直している: 「その項目や段落」", section)
+        self.assertNotIn("s0003", section)
+        self.assertIn("s0005 直前の文と同じ主題: 「tsuzuriは」", section)
+
+    def test_load_topic_echo_with_fullwidth_punctuation(self):
+        """主題の末尾の語を述語でもう一度言う文は、「，」「．」で書いても挙げ、違う語で言い切る文は挙げない。"""
+        self.sentence("決める順は，要件定義書，設計書，一文ずつの順です．")
+        self.sentence("この欄の名前は，画面の名前と同じです．")
+        section = self.cli("load", self.root).stdout.split("## 主題と述語の同じ語")[1].split("##")[0]
+        self.assertIn("s0001 「順は、…順です」", section)
+        self.assertNotIn("s0002", section)
+
+    def test_drift_negation_recognizes_fullwidth_comma(self):
+        """「〜せず，」のように「ず」のあとが「，」でも否定の変化として挙げる。"""
+        self.sentence("確認します．")
+        self.cli("memo", self.root, "--sid", "s0001", "--text", "狙い")
+        self.cli("write", self.root, "--sid", "s0001", "--ver", "v002", "--text", "確認せず，進めます．", "--tags", json.dumps(self.tags()))
+        out = self.cli("drift", self.root).stdout
+        self.assertIn("s0001 v001→v002 否定: [] → ['ず，']", out)
+
+    # ---- コメント・数式・生の記述のブロック ----
+
+    def test_comment_math_raw_blocks_are_recorded_and_validated(self):
+        """コメント・数式・生の記述は本文必須の入れ物でないブロックで、attach は真偽値だけを受ける。"""
+        self.block({"kind": "comment"}, "根拠: 設計書 p1")
+        self.block({"kind": "math"}, "E = mc^2")
+        self.block({"kind": "raw"}, "\\begin{theorem}\nA\n\\end{theorem}")
+        self.block({"kind": "raw", "attach": True}, "\\label{eq:a}")
+        self.block({"kind": "raw", "attach": False}, "\\clearpage")
+        self.cli("check", self.root)
+        self.assertEqual(len(list((self.root / "blocks").iterdir())), 5)
+        tsuzuri._validate_block({"kind": "raw", "attach": True}, "x")
+        tsuzuri._validate_block({"kind": "raw"}, "x")
+        for bad in ("true", 1, 0, None, []):
+            with self.subTest(attach=bad):
+                with self.assertRaises(ValueError):
+                    tsuzuri._validate_block({"kind": "raw", "attach": bad}, "x")
+                self.cli("write", self.root, "--human", "--block", json.dumps({"kind": "raw", "attach": bad}),
+                         "--text", "\\label{x}", "--tags", '{"place":"要件"}', code=2)
+        for kind in ("comment", "math", "raw"):
+            with self.subTest(kind=kind):
+                self.cli("write", self.root, "--human", "--block", json.dumps({"kind": kind}), "--text", " ",
+                         "--tags", '{"place":"要件"}', code=2)
+        self.assertEqual(len(list((self.root / "blocks").iterdir())), 5)
+        # 入れ物ではないので、文の所属先にできない
+        self.cli("write", self.root, "--human", "--text", "文。", "--tags", json.dumps(self.tags()), "--in", "b0001", code=2)
+        self.assertTrue({"comment", "math", "raw"}.isdisjoint(tsuzuri.CONTAINERS))
+
+    def test_comment_lines_and_math_blocks_by_flavor(self):
+        """LaTeX のコメントは行ごとに「%」で包み、すでに「%」で始まる行はそのまま残す。Markdown 系はブロック全体を1組の HTML コメントで包む。数式は囲みの無いときだけ囲む。"""
+        self.assertEqual(tsuzuri._comment_lines("a\n\n% b\n  % c", "latex"), "% a\n%\n% b\n  % c")
+        # 以前の呼び出しの形（LaTeX かどうかの真偽値）も受ける
+        self.assertEqual(tsuzuri._comment_lines("a\n\n% b\n  % c", True), "% a\n%\n% b\n  % c")
+        self.assertEqual(tsuzuri._comment_lines("根拠", False), "<!-- 根拠 -->")
+        self.assertEqual(tsuzuri._math_block("x^2", False), "$$\nx^2\n$$")
+        self.assertEqual(tsuzuri._math_block("$$x^2$$", False), "$$x^2$$")
+        self.assertEqual(tsuzuri._math_block("x^2", True), "\\[\nx^2\n\\]")
+        for already in ("\\begin{align}a\\end{align}", "\\[a\\]", "$$a$$", "  \\begin{equation}a\\end{equation}"):
+            self.assertEqual(tsuzuri._math_block(already, True), already)
+
+    def test_export_markdown_with_comment_math_and_raw_blocks(self):
+        """Markdown 系の書き出し。コメントは段落を切らず HTML コメントに、数式は $$ で囲み、raw は attach で前のチャンクへ密着する。"""
+        self.sentence("一．", tags=self.tags(relation="段落の始まり"))
+        self.block({"kind": "comment"}, "根拠: s1 は要件 1")
+        self.sentence("二．")
+        self.block({"kind": "math"}, "x^2 + y^2 = z^2")
+        self.block({"kind": "math"}, "$$a$$")
+        self.block({"kind": "raw"}, "\\label{x}")
+        self.block({"kind": "raw", "attach": True}, "\\index{y}")
+        self.sentence("三．", tags=self.tags(relation="段落の始まり"))
+        self.cli("check", self.root)
+        for flavor in ("gfm", "qiita", "zenn"):
+            with self.subTest(flavor=flavor):
+                self.cli("export", self.root, "--flavor", flavor)
+                self.assertEqual((self.root / "text.md").read_text(encoding="utf-8"),
+                                 "一．\n<!-- 根拠: s1 は要件 1 -->\n二．\n\n$$\nx^2 + y^2 = z^2\n$$\n\n$$a$$\n\n"
+                                 "\\label{x}\n\\index{y}\n\n三．\n")
+        self.assertFalse((self.root / "text.tex").exists())
+        starts = tsuzuri._paragraph_starts(self.root, self.load("order.json"))
+        self.assertTrue(starts["s0001"])
+        self.assertFalse(starts["s0002"])
+        self.assertTrue(starts["s0003"])
+
+    def test_export_latex_writes_every_block_to_text_tex(self):
+        """--flavor latex は text.tex に、付帯情報・見出し・コメント・数式・コード・入れ物・脚注をすべて LaTeX の記述で書き出す。"""
+        self.cli("meta", self.root, input="\\title{構想}\n")
+        self.block({"kind": "heading", "level": 1}, "はじめに")
+        self.block({"kind": "raw", "attach": True}, "\\label{sec:intro}")
+        self.sentence("本文[^a]の説明で `[^a]` は展開しない。", tags=self.tags(relation="段落の始まり"))
+        footnote, _ = self.block({"kind": "footnote", "label": "a"})
+        human = lambda text, container, *extra: self.cli("write", self.root, "--human", "--text", text,
+                                                          "--tags", json.dumps(self.tags()), "--in", container, *extra)
+        human("注の一。", footnote)
+        human("注の二。", footnote)
+        self.sentence("次の文。")
+        self.block({"kind": "comment"}, "メモ: 数式は後で確認")
+        self.block({"kind": "math"}, "E = mc^2")
+        self.block({"kind": "math"}, "\\begin{align}a&=b\\end{align}")
+        self.block({"kind": "heading", "level": 2}, "節")
+        self.block({"kind": "heading", "level": 3}, "小節")
+        self.block({"kind": "heading", "level": 4}, "段落見出し")
+        self.block({"kind": "code", "lang": "python"}, "print('[^a]')")
+        bullets, _ = self.block({"kind": "list", "ordered": False})
+        human("項目一。", bullets)
+        human("続き。", bullets, "--cont")
+        human("項目二。", bullets)
+        steps, _ = self.block({"kind": "list", "ordered": True})
+        human("手順一。", steps)
+        human("手順二[^a]。", steps)
+        quote, _ = self.block({"kind": "quote"})
+        human("引用一。", quote)
+        human("引用二。", quote)
+        for note_type in ("info", "warn", "alert"):
+            note, _ = self.block({"kind": "note", "type": note_type})
+            human("中身。", note)
+        self.block({"kind": "image"}, "\\includegraphics{a.png}")
+        self.block({"kind": "table"}, "\\begin{tabular}{c}A\\end{tabular}")
+        self.block({"kind": "raw"}, "\\newpage")
+        self.sentence("最後の文。", tags=self.tags(relation="段落の始まり"))
+        self.cli("check", self.root)
+        self.cli("export", self.root, "--flavor", "latex")
+        footnote_text = "\\footnote{注の一。注の二。}"
+        self.assertEqual(
+            (self.root / "text.tex").read_text(encoding="utf-8"),
+            "\\title{構想}\n\n"
+            "\\section{はじめに}\n\\label{sec:intro}\n\n"
+            f"本文{footnote_text}の説明で `[^a]` は展開しない。\n次の文。\n% メモ: 数式は後で確認\n\n"
+            "\\[\nE = mc^2\n\\]\n\n"
+            "\\begin{align}a&=b\\end{align}\n\n"
+            "\\subsection{節}\n\n\\subsubsection{小節}\n\n\\paragraph{段落見出し}\n\n"
+            "\\begin{verbatim}\nprint('[^a]')\n\\end{verbatim}\n\n"
+            "\\begin{itemize}\n\\item 項目一。続き。\n\\item 項目二。\n\\end{itemize}\n\n"
+            f"\\begin{{enumerate}}\n\\item 手順一。\n\\item 手順二{footnote_text}。\n\\end{{enumerate}}\n\n"
+            "\\begin{quote}\n引用一。\n引用二。\n\\end{quote}\n\n"
+            "\\begin{quote}\n\\textbf{Note:} 中身。\n\\end{quote}\n\n"
+            "\\begin{quote}\n\\textbf{Warning:} 中身。\n\\end{quote}\n\n"
+            "\\begin{quote}\n\\textbf{Caution:} 中身。\n\\end{quote}\n\n"
+            "\\includegraphics{a.png}\n\n\\begin{tabular}{c}A\\end{tabular}\n\n\\newpage\n\n最後の文。\n")
+        self.assertFalse((self.root / "text.md").exists())
+        # Markdown の書き出しは text.md へ出し、text.tex には触れない。同じ記録の脚注は Markdown では末尾に並ぶ
+        self.cli("export", self.root)
+        markdown = (self.root / "text.md").read_text(encoding="utf-8")
+        self.assertIn("<!-- メモ: 数式は後で確認 -->", markdown)
+        self.assertTrue(markdown.rstrip().endswith("[^a]: 注の一。注の二。"))
+        self.assertIn("\\footnote{", (self.root / "text.tex").read_text(encoding="utf-8"))
+
+    def test_export_latex_keeps_unmatched_footnote_references_and_inline_footnote(self):
+        """対応する脚注が無い呼び出しと、本文に直書きした \\footnote{…} は、LaTeX の書き出しでもそのまま残す。"""
+        self.sentence("直書きは\\footnote{そのまま}残す。[^none]")
+        self.cli("export", self.root, "--flavor", "latex")
+        self.assertEqual((self.root / "text.tex").read_text(encoding="utf-8"), "直書きは\\footnote{そのまま}残す。[^none]\n")
+        self.cli("export", self.root, "--flavor", "note", code=2)
+        self.assertIn("latex", tsuzuri.FLAVORS)
+
+    # ---- コメントと段落 ----
+
+    def reset_record(self):
+        """同じ試験の中で、新しい記録に作り直す。"""
+        shutil.rmtree(self.root)
+        self.cli("init", self.document)
+        self.cli("req", self.root, input=REQUIREMENTS)
+
+    def paragraph_sentence(self, text, para, **tag_changes):
+        """設計書のある記録に、段落 para の文を足す。"""
+        sid, ver = self.cli("memo", self.root, "--text", "これから書く").stdout.split()
+        self.cli("write", self.root, "--sid", sid, "--ver", ver, "--text", text,
+                 "--tags", json.dumps(self.tags(**tag_changes)), "--para", para)
+        return sid
+
+    def paragraph_block(self, spec, text, para):
+        """設計書のある記録に、段落 para のブロックを足す。"""
+        sid, ver = self.cli("memo", self.root, "--block", "--text", "置く狙い").stdout.split()
+        self.cli("write", self.root, "--sid", sid, "--ver", ver, "--block", json.dumps(spec), "--text", text,
+                 "--tags", '{"place":"1. 言いたいこと"}', "--para", para)
+        return sid
+
+    def article(self, flavor):
+        """記録を書き出し、方言の書き出し先の中身を返す。"""
+        self.cli("export", self.root, "--flavor", flavor)
+        return (self.root / ("text.tex" if flavor == "latex" else "text.md")).read_text(encoding="utf-8")
+
+    def test_comment_leads_the_paragraph_it_annotates(self):
+        """文書の先頭のコメントは、続く最初の文と空行を挟まない（設計書の有無によらない）。"""
+        for designed in (False, True):
+            with self.subTest(designed=designed):
+                self.reset_record()
+                if designed:
+                    self.cli("design", self.root, input=DESIGN)
+                    self.paragraph_block({"kind": "comment"}, "根拠", "p1")
+                    self.paragraph_sentence("本文．", "p1")
+                else:
+                    self.block({"kind": "comment"}, "根拠")
+                    self.sentence("本文．")
+                self.assertEqual(self.article("latex"), "% 根拠\n本文．\n")
+                self.assertEqual(self.article("gfm"), "<!-- 根拠 -->\n本文．\n")
+
+    def test_comment_between_paragraphs_with_design(self):
+        """設計書があるとき、コメントの段落が前の文と違えば、前の段落とは空行で分け、次の文とは空行を挟まない。"""
+        self.cli("design", self.root, input=DESIGN)
+        self.paragraph_sentence("一．", "p1")
+        self.paragraph_block({"kind": "comment"}, "コメント", "p2")
+        self.paragraph_sentence("二．", "p2")
+        self.cli("check", self.root)
+        self.assertEqual(self.article("latex"), "一．\n\n% コメント\n二．\n")
+        self.assertEqual(self.article("zenn"), "一．\n\n<!-- コメント -->\n二．\n")
+
+    def test_comment_inside_one_paragraph_with_design(self):
+        """設計書があり、前後の文と同じ段落のコメントは、段落の途中に入れて空行を挟まない。"""
+        self.cli("design", self.root, input=DESIGN)
+        self.paragraph_sentence("一．", "p1")
+        self.paragraph_block({"kind": "comment"}, "コメント", "p1")
+        self.paragraph_sentence("二．", "p1")
+        self.assertEqual(self.article("latex"), "一．\n% コメント\n二．\n")
+        starts = tsuzuri._paragraph_starts(self.root, self.load("order.json"))
+        self.assertEqual([starts[sid] for sid in ("s0001", "b0001", "s0002")], [True, False, False])
+
+    def test_comment_after_heading_stays_with_the_following_sentence(self):
+        """見出しの直後のコメントは、見出しとは空行で分け、続く文とは空行を挟まない。"""
+        self.cli("design", self.root, input=DESIGN)
+        self.paragraph_block({"kind": "heading", "level": 1}, "はじめに", "p1")
+        self.paragraph_block({"kind": "comment"}, "コメント", "p1")
+        self.paragraph_sentence("本文．", "p1")
+        self.assertEqual(self.article("latex"), "\\section{はじめに}\n\n% コメント\n本文．\n")
+
+    def test_comment_without_design_follows_the_next_sentence(self):
+        """設計書が無いとき、コメントは次の文が段落の始まりでなければ前の段落に入り、始まりなら次の段落の頭に置く。続くコメントは1つにまとまる。"""
+        start = self.tags(relation="段落の始まり")
+        cases = {
+            "段落の途中": ([("s", "一．", start), ("c", "コメント"), ("s", "二．", None)], "一．\n% コメント\n二．\n"),
+            "次が新しい段落": ([("s", "一．", start), ("c", "コメント"), ("s", "二．", start)], "一．\n\n% コメント\n二．\n"),
+            "末尾": ([("s", "一．", start), ("c", "コメント")], "一．\n% コメント\n"),
+            "続くコメント": ([("s", "一．", start), ("c", "c1"), ("c", "c2"), ("s", "二．", start)], "一．\n\n% c1\n% c2\n二．\n"),
+            "見出しの前": ([("s", "一．", start), ("c", "コメント"), ("h", "見出し")], "一．\n% コメント\n\n\\section{見出し}\n"),
+        }
+        for name, (entries, expected) in cases.items():
+            with self.subTest(name):
+                self.reset_record()
+                for kind, text, *rest in entries:
+                    if kind == "s":
+                        self.sentence(text, tags=rest[0] or self.tags())
+                    elif kind == "c":
+                        self.block({"kind": "comment"}, text)
+                    else:
+                        self.block({"kind": "heading", "level": 1}, text)
+                self.assertEqual(self.article("latex"), expected)
+
+    def test_raw_attach_sticks_to_the_previous_chunk(self):
+        """attach の raw は直前のチャンクへ改行で密着し、続く文の段落の扱いを変えない。attach が偽なら独立したブロック。"""
+        self.cli("design", self.root, input=DESIGN)
+        self.paragraph_block({"kind": "heading", "level": 1}, "はじめに", "p1")
+        self.paragraph_block({"kind": "raw", "attach": True}, "\\label{sec:intro}", "p1")
+        self.paragraph_sentence("本文．", "p1")
+        self.assertEqual(self.article("latex"), "\\section{はじめに}\n\\label{sec:intro}\n\n本文．\n")
+        self.reset_record()
+        self.sentence("一．", tags=self.tags(relation="段落の始まり"))
+        self.block({"kind": "raw", "attach": True}, "\\index{a}")
+        self.sentence("二．")
+        self.assertEqual(self.article("latex"), "一．\n\\index{a}\n二．\n")
+        starts = tsuzuri._paragraph_starts(self.root, self.load("order.json"))
+        self.assertFalse(starts["s0002"])
+        self.reset_record()
+        self.sentence("一．", tags=self.tags(relation="段落の始まり"))
+        self.block({"kind": "raw", "attach": False}, "\\newpage")
+        self.sentence("二．")
+        self.assertEqual(self.article("latex"), "一．\n\n\\newpage\n\n二．\n")
+        self.assertTrue(tsuzuri._paragraph_starts(self.root, self.load("order.json"))["s0002"])
+        self.reset_record()
+        self.block({"kind": "raw", "attach": True}, "\\label{x}")
+        self.sentence("本文．")
+        self.assertEqual(self.article("latex"), "\\label{x}\n\n本文．\n")
+
+    def test_cold_leaves_out_comment_blocks(self):
+        """文脈の無い読み手には、読み手に見えないコメントを渡さない。数式は種類の印つきで渡す。"""
+        self.cli("req", self.root, input="## 1. 依頼\n頼み\n\n## 2. 書く理由\n理由\n\n## 3. 公開する場所と読み手\n社内の板。\n")
+        self.block({"kind": "comment"}, "秘密のコメント")
+        self.sentence("本文。")
+        self.block({"kind": "math"}, "x^2")
+        out = self.cli("cold", self.root).stdout
+        self.assertNotIn("秘密のコメント", out)
+        self.assertIn("[b0002] （math）x^2", out)
+
+    # ---- LaTeX の記法を認識する検査 ----
+
+    def test_visible_removes_latex_commands_and_math(self):
+        """読み手に見える字から、LaTeX の参照・数式を消し、\\href は表示名、装飾は中身を残す。値段の「$」と「$$」は壊さない。"""
+        visible = tsuzuri._visible
+        self.assertEqual(visible("\\href{https://example.com/a}{公式の資料}を読む"), "公式の資料を読む")
+        self.assertEqual(visible("\\textbf{強調}と\\emph{\\textit{入れ子}}と\\underline{下線}\\textrm{a}\\textsf{b}\\texttt{c}\\text{d}"),
+                         "強調と入れ子と下線abcd")
+        for command in ("cite", "citep", "citet", "ref", "eqref", "pageref", "autoref", "cref", "Cref", "label", "url"):
+            with self.subTest(command=command):
+                self.assertEqual(visible(f"本文\\{command}{{key:1}}です"), "本文です")
+        self.assertEqual(visible("本文\\cite[p.3]{key}です"), "本文です")
+        self.assertEqual(visible("本文\\citep[参照][p.3]{key}です"), "本文です")
+        self.assertEqual(visible("式$x^2+y^2$と\\(a+b\\)を使う"), "式とを使う")
+        self.assertEqual(visible("価格は\\$5と\\$10です"), "価格は\\$5と\\$10です")
+        self.assertEqual(visible("$$E=mc^2$$"), "$$E=mc^2$$")
+        self.assertEqual(visible("値段は$5 と $10 です"), "値段は$5 と $10 です")
+        self.assertEqual(visible('<span style="color:red">**テト**</span>の[資料](https://example.com/a)と[^1]。'), "テトの資料と。")
+
+    def test_load_ignores_latex_commands_in_length_and_commas(self):
+        """長い文と読点は、LaTeX の参照・数式を除いた見える字で数える。"""
+        self.sentence("あ" * 40 + "\\cite{" + "k" * 30 + "}。")
+        self.sentence("式$a、b、c、d$は成り立つ、ただし、条件付き。")
+        self.sentence("読点が、多くて、長くて、読みにくい文。")
+        out = self.cli("load", self.root).stdout
+        self.assertNotIn("s0001", out.split("## 長い文")[1].split("\n## ")[0])
+        heavy = out.split("## 読点の多い文")[1].split("\n## ")[0]
+        self.assertNotIn("s0002", heavy)
+        self.assertIn("s0003 読点 3", heavy)
+
+    def test_potential_forms_skip_latex_spans_and_verbatim_blocks(self):
+        """可能動詞の短い形は、\\texttt・参照・数式の中とコード・コメント・数式・生の記述のブロックでは探さず、装飾の中は探す。"""
+        self.sentence("式は$読める$と\\texttt{読める}と\\cite{読める}と\\ref{読める}と\\eqref{読める}と\\label{読める}と\\url{読める}と\\(読める\\)で，一覧から開けます．")
+        self.sentence("\\textbf{使えます}。")
+        for spec in ({"kind": "code", "lang": ""}, {"kind": "comment"}, {"kind": "math"}, {"kind": "raw"}):
+            self.block(spec, "読めます")
+        section = self.cli("load", self.root).stdout.split("## 可能動詞の短い形")[1].split("\n## ")[0]
+        lines = [line for line in section.splitlines() if line.startswith("s0")]
+        self.assertEqual(lines, ["s0001 可能動詞の短い形「開け」", "s0002 可能動詞の短い形「使え」"])
+        self.assertNotIn("b000", section)
+
+    def test_words_skip_latex_spans_and_verbatim_blocks_but_check_the_memo(self):
+        """校正辞書は、LaTeX の記述の中とコード・コメント・数式・生の記述のブロックの本文には当てず、文の本文と執筆意図には当てる。"""
+        # 利用者の実際の校正辞書（~/.config）が当たりを増やさないよう、空の辞書に向ける
+        empty = self.directory / "words.tsv"
+        empty.write_text("# 空\n", encoding="utf-8")
+        self.env["TSUZURI_WORDS"] = str(empty)
+        self.sentence("\\texttt{道具}と$道具$と\\cite{道具}と\\ref{道具}と\\label{道具}と\\url{道具}と\\(道具\\)と道具を使う．")
+        for spec in ({"kind": "code", "lang": ""}, {"kind": "comment"}, {"kind": "math"}, {"kind": "raw"}):
+            self.block(spec, "道具")
+        sid, ver = self.cli("memo", self.root, "--block", "--text", "道具を置く").stdout.split()
+        self.cli("write", self.root, "--sid", sid, "--ver", ver, "--block", '{"kind":"raw"}', "--text", "道具",
+                 "--tags", '{"place":"1. 言いたいこと"}')
+        out = self.cli("words", self.root).stdout
+        self.assertEqual(out.count("s0001 v001 文: 「道具」→ ツール"), 1)
+        self.assertIn("と道具を使う．…", out)
+        for number in range(1, 5):
+            self.assertNotIn(f"b000{number}", out)
+        self.assertIn(f"{sid} v001 執筆意図: 「道具」", out)
+        self.assertIn("当たり 2 件", out)
+
+    def test_new_topics_use_visible_text_and_ignore_verbatim_blocks(self):
+        """初めて出る語の主題は、装飾の中の語も見つけ、コメント・生の記述に出た語は導入済みに数えない。"""
+        self.block({"kind": "raw"}, "\\begin{proof} サンプル")
+        self.sentence("サンプルは役に立つ。")
+        self.sentence("\\textbf{ダイス}は面白い。")
+        section = self.cli("load", self.root).stdout.split("## 初めて出る語の主題")[1].split("##")[0]
+        self.assertIn("s0001 「サンプルは」", section)
+        self.assertIn("s0002 「ダイスは」", section)
+
+
+    # ---- Markdown コメントの閉じ漏れ・LaTeX 記法の線形化・drift・LaTeX ブロックの細部 ----
+
+    def test_markdown_comment_is_one_html_comment_that_text_cannot_close(self):
+        """Markdown 系のコメントはブロック全体を1組の HTML コメントで包み、本文の「-->」や「--」でコメントが途中で閉じない。"""
+        comment = tsuzuri._comment_lines
+        self.assertEqual(comment("一行目\n\n二行目", "gfm"), "<!--\n一行目\n\n二行目\n-->")
+        self.assertEqual(comment("本文の-->漏れ", "qiita"), "<!-- 本文の- ->漏れ -->")
+        self.assertEqual(comment("a---b", "zenn"), "<!-- a- - -b -->")
+        # すでに全体が1つの正しいコメントなら、二重に包まない
+        self.assertEqual(comment("<!-- 既に -->", "gfm"), "<!-- 既に -->")
+        self.assertEqual(comment("\n<!--\n複数行\n-->\n", "gfm"), "<!--\n複数行\n-->")
+        # 2つのコメントが並ぶ文字列は「1つの正しいコメント」ではないので、全体を包み直して中の「--」を無害にする
+        self.assertEqual(comment("<!-- a --><!-- b -->", "gfm"), "<!-- <!- - a - -><!- - b - -> -->")
+        # 先頭の「>」・末尾の「-」・空は、開きと閉じの記号とつながらない形にする
+        self.assertEqual(comment(">先頭", "gfm"), "<!-- >先頭 -->")
+        self.assertEqual(comment("末尾-", "gfm"), "<!-- 末尾- -->")
+        self.assertEqual(comment("<!---->", "gfm"), "<!---->")
+        self.assertEqual(comment("  \n", "gfm"), "<!-- -->")
+        for text in ("a-->b", "<!-- x --> y --> z", "-->", "--->", "a\n-->\nb", "<!--->", "<!-->"):
+            with self.subTest(text=text):
+                wrapped = comment(text, "gfm")
+                self.assertTrue(wrapped.startswith("<!--") and wrapped.endswith("-->"), wrapped)
+                self.assertEqual(wrapped.count("-->"), 1, wrapped)
+                self.assertNotIn("--", wrapped[4:-3])
+
+    def test_export_markdown_comment_with_arrow_does_not_leak(self):
+        """「-->」を含む複数行のコメントを書き出しても、HTML コメントは最後の1か所でだけ閉じる。LaTeX は行ごとの「%」のまま。"""
+        self.sentence("一．", tags=self.tags(relation="段落の始まり"))
+        self.block({"kind": "comment"}, "根拠-->本文に漏れる\n二行目")
+        self.sentence("二．")
+        self.assertEqual(self.article("gfm"), "一．\n<!--\n根拠- ->本文に漏れる\n二行目\n-->\n二．\n")
+        self.assertEqual(self.article("latex"), "一．\n% 根拠-->本文に漏れる\n% 二行目\n二．\n")
+
+    def test_tex_removal_is_linear_for_unclosed_commands(self):
+        """閉じの無い \\( ・\\cite[ ・入れ子の \\emph{ を2万回並べても、LaTeX 記法の除去は二乗の時間にならない。"""
+        n = 20000
+        samples = {
+            "未閉鎖の \\(": "\\(" * n,
+            "未閉鎖の \\cite[": "\\cite[" * n,
+            "未閉鎖の \\emph{": "\\emph{" * n,
+            "深い入れ子": "\\emph{" * n + "x" + "}" * n,
+            "未閉鎖の \\href{": "\\href{" * n,
+            "未閉鎖の $": "$a " * n,
+            "混在": "\\cite[a\\(b$" * n,
+        }
+        for name, text in samples.items():
+            for function in (tsuzuri._visible, tsuzuri._mask_tex):
+                with self.subTest(name=name, function=function.__name__):
+                    started = time.perf_counter()
+                    result = function(text)
+                    self.assertLess(time.perf_counter() - started, 0.5)
+                    if function is tsuzuri._mask_tex:
+                        self.assertEqual(len(result), len(text))
+
+    def test_tex_removal_handles_nesting_and_leaves_unclosed_text(self):
+        """入れ子の装飾は中まで外し、閉じの無い記法は本文を巻き込まずに残す。深すぎる入れ子は外さずに残す。"""
+        visible = tsuzuri._visible
+        self.assertEqual(visible("\\textbf{\\emph{\\underline{深い}}}"), "深い")
+        self.assertEqual(visible("\\href{https://example.com}{\\textbf{表示}}を読む"), "表示を読む")
+        self.assertEqual(visible("\\(a \\cite[x 本文 \\emph{強調}と\\cite{k}"), "\\(a \\cite[x 本文 強調と")
+        self.assertEqual(visible("\\emph{閉じない 本文"), "\\emph{閉じない 本文")
+        self.assertEqual(visible("\\\\emph{x}"), "\\\\emph{x}")
+        deep = "\\emph{" * (tsuzuri._TEX_MAX_DEPTH + 2) + "中身" + "}" * (tsuzuri._TEX_MAX_DEPTH + 2)
+        self.assertIn("中身", visible(deep))
+        spans = ["\\texttt{b}", "\\cite[x]{k}", "\\ref{r}", "$x$", "\\(y\\)"]
+        masked = tsuzuri._mask_tex("a" + "と".join(spans))
+        self.assertEqual(masked, "a" + "と".join(" " * len(span) for span in spans))
+
+    def test_inline_code_is_not_read_as_latex_or_html(self):
+        """インラインコードの中は、数式・参照・タグとして消さない。「`$HOME`と`$PATH`」の間の「と」も消えない。"""
+        for text in ("環境変数`$HOME`と`$PATH`を設定する", "`<番号>`を入れる", "`\\cite{k}`と`\\(x\\)`と`\\emph{y}`", "`[^a]`と`[x](y)`"):
+            with self.subTest(text=text):
+                self.assertEqual(tsuzuri._visible(text), text)
+                self.assertEqual(tsuzuri._mask_tex(text), text)
+        # コードの外の記法は、コードがあっても今までどおり外す
+        self.assertEqual(tsuzuri._visible("`$A`と\\cite{k}と<b>太</b>と`<i>`"), "`$A`と" + "と太と`<i>`")
+        self.assertEqual(tsuzuri._mask_tex("`\\texttt{x}`と\\texttt{y}"), "`\\texttt{x}`と" + " " * len("\\texttt{y}"))
+        self.assertEqual(tsuzuri._visible("[`code`](https://example.com)"), "`code`")
+
+    def test_drift_ignores_punctuation_only_changes(self):
+        """句読点を「、。」から「，．」に変えただけの直しは、否定などの変化として挙げない。意味の変化は今までどおり挙げる。"""
+        self.sentence("実行せず、戻る。")
+        self.cli("memo", self.root, "--sid", "s0001", "--text", "句読点だけ直す")
+        self.cli("write", self.root, "--sid", "s0001", "--ver", "v002", "--text", "実行せず，戻る．", "--tags", json.dumps(self.tags()))
+        self.assertEqual(self.cli("drift", self.root).stdout, "")
+        self.cli("memo", self.root, "--sid", "s0001", "--text", "否定を外す")
+        self.cli("write", self.root, "--sid", "s0001", "--ver", "v003", "--text", "実行して，戻る．", "--tags", json.dumps(self.tags()))
+        self.assertIn("s0001 v002→v003 否定: ['ず，'] → []", self.cli("drift", self.root).stdout)
+
+    def footnote_record(self, body, *, call="本文[^a]。"):
+        """脚注 a を持つ記録を作る。body は脚注の中の文。"""
+        self.sentence(call, tags=self.tags(relation="段落の始まり"))
+        footnote, _ = self.block({"kind": "footnote", "label": "a"})
+        self.cli("write", self.root, "--human", "--text", body, "--tags", json.dumps(self.tags()), "--in", footnote)
+
+    def test_latex_footnote_inside_footnote_is_refused(self):
+        """LaTeX は \\footnote を入れ子にできないため、脚注の中から別の脚注を呼ぶ記録は LaTeX だけで書き出しを止める。"""
+        self.sentence("本文[^a]と[^b]。", tags=self.tags(relation="段落の始まり"))
+        first, _ = self.block({"kind": "footnote", "label": "a"})
+        self.cli("write", self.root, "--human", "--text", "注一[^b]。", "--tags", json.dumps(self.tags()), "--in", first)
+        second, _ = self.block({"kind": "footnote", "label": "b"})
+        self.cli("write", self.root, "--human", "--text", "注二。", "--tags", json.dumps(self.tags()), "--in", second)
+        result = self.cli("export", self.root, "--flavor", "latex", code=2)
+        self.assertIn("脚注の中から別の脚注を参照できません", result.stderr)
+        self.assertFalse((self.root / "text.tex").exists())
+        self.cli("export", self.root, "--flavor", "gfm")
+        self.assertIn("[^a]: 注一[^b]。", (self.root / "text.md").read_text(encoding="utf-8"))
+        # インラインコードに書いた [^b] は呼び出しではないので止めない
+        self.reset_record()
+        self.footnote_record("書き方は `[^b]` と書く。")
+        self.cli("export", self.root, "--flavor", "latex")
+
+    def test_latex_warns_when_the_same_footnote_is_called_twice(self):
+        """同じ脚注を2回呼ぶと、LaTeX は番号を共有できないので警告する。書き出しは止めず、呼ぶたびに同じ中身の \\footnote を出す。"""
+        self.footnote_record("注。", call="一[^a]と二[^a]。")
+        result = self.cli("export", self.root, "--flavor", "latex")
+        self.assertIn("脚注 [^a] を 2 回呼んでいます", result.stderr)
+        self.assertEqual((self.root / "text.tex").read_text(encoding="utf-8"), "一\\footnote{注。}と二\\footnote{注。}。\n")
+        self.assertNotIn("2 回呼んでいます", self.cli("export", self.root, "--flavor", "gfm").stderr)
+        self.reset_record()
+        self.footnote_record("注。", call="一[^a]。")
+        self.assertNotIn("回呼んでいます", self.cli("export", self.root, "--flavor", "latex").stderr)
+
+    def test_latex_block_details(self):
+        """注記は先頭に太字の種類、「[」で始まる箇条書きの項目は空の組を挟み、Markdown の \\[…\\] の数式は $$ に差し替える。"""
+        human = lambda text, container: self.cli("write", self.root, "--human", "--text", text,
+                                                 "--tags", json.dumps(self.tags()), "--in", container)
+        bullets, _ = self.block({"kind": "list", "ordered": False})
+        human("[注]の付いた項目。", bullets)
+        human("ふつうの項目。", bullets)
+        note, _ = self.block({"kind": "note", "type": "warn"})
+        human("一行目。", note)
+        human("二行目。", note)
+        self.block({"kind": "math"}, "\\[\nx^2\n\\]")
+        self.cli("check", self.root)
+        self.assertEqual(self.article("latex"),
+                         "\\begin{itemize}\n\\item {}[注]の付いた項目。\n\\item ふつうの項目。\n\\end{itemize}\n\n"
+                         "\\begin{quote}\n\\textbf{Warning:} 一行目。\n二行目。\n\\end{quote}\n\n"
+                         "\\[\nx^2\n\\]\n")
+        self.assertEqual(self.article("gfm").splitlines()[-3:], ["$$", "x^2", "$$"])
+        self.assertEqual(tsuzuri._math_block("\\[ a \\]\n", False), "$$\na\n$$")
+        self.assertEqual(tsuzuri._math_block("\\[a\\] と \\[b\\]", False), "$$\n\\[a\\] と \\[b\\]\n$$")
+        self.assertEqual(tsuzuri._math_block("\\[\\]", False), "$$\n\\[\\]\n$$")
+
+    def test_latex_warns_about_bare_percent_and_verbatim_end(self):
+        """LaTeX の書き出しは、本文・見出し・脚注・箇条書きの裸の「%」と、コードの中の \\end{verbatim} を標準エラーへ警告する。"""
+        self.block({"kind": "heading", "level": 1}, "割合は50%")
+        self.sentence("売上は5%増えた。\\%は直した。")
+        self.sentence("エスケープ済みの\\%だけの文。")
+        self.block({"kind": "comment"}, "コメントの 50% は警告しない")
+        bullets, _ = self.block({"kind": "list", "ordered": False})
+        self.cli("write", self.root, "--human", "--text", "項目の5%。", "--tags", json.dumps(self.tags()), "--in", bullets)
+        self.block({"kind": "code", "lang": ""}, "\\end{verbatim}")
+        self.block({"kind": "math"}, "a % 数式のコメントは警告しない")
+        self.cli("check", self.root)
+        result = self.cli("export", self.root, "--flavor", "latex")
+        for sid in ("b0001", "s0001", "s0003"):
+            self.assertRegex(result.stderr, f"警告: {sid} にエスケープされていない %")
+        self.assertNotIn("s0002 にエスケープ", result.stderr)
+        self.assertNotIn("b0002 にエスケープ", result.stderr)
+        self.assertNotIn("b0005 にエスケープ", result.stderr)
+        self.assertIn("b0004 のコードに \\end{verbatim} が含まれています", result.stderr)
+        self.assertNotIn("エスケープされていない", self.cli("export", self.root, "--flavor", "gfm").stderr)
+
+    def test_article_without_meta_returns_only_the_body(self):
+        """include_meta=False は付帯情報を付けずに本文だけを返し、既定は今までどおり付帯情報つき。"""
+        self.cli("meta", self.root, input="title: 構想\n")
+        self.sentence("本文．")
+        order = tsuzuri._order(self.root)
+        full = tsuzuri._article(self.root, order)
+        self.assertTrue(full.startswith("---\ntitle: 構想\n---\n\n"))
+        body = tsuzuri._article(self.root, order, include_meta=False)
+        self.assertEqual(body, "本文．\n")
+        self.assertEqual(full, tsuzuri._article(self.root, order, "gfm", include_meta=True))
+        self.assertEqual(full.split("\n---\n\n", 1)[1], body)
+        self.cli("meta", self.root, input="\\title{構想}\n")
+        self.assertEqual(tsuzuri._article(self.root, order, "latex", include_meta=False), "本文．\n")
+        with self.assertRaises(TypeError):
+            tsuzuri._article(self.root, order, "gfm", False)
+
+    def test_comment_with_other_paragraph_splits_before_and_after(self):
+        """設計書があり、コメントの段落が前後の文と違うときは、書き出しの空行と段落の始まりの判定を同じにする。"""
+        self.cli("design", self.root, input=DESIGN)
+        self.paragraph_sentence("一．", "p1")
+        self.paragraph_block({"kind": "comment"}, "c", "p2")
+        self.paragraph_sentence("二．", "p1")
+        order = self.load("order.json")
+        starts = tsuzuri._paragraph_starts(self.root, order)
+        self.assertEqual([starts[sid] for sid in ("s0001", "b0001", "s0002")], [True, False, True])
+        self.assertEqual(self.article("gfm"), "一．\n\n<!-- c -->\n\n二．\n")
+        self.assertEqual(self.article("latex"), "一．\n\n% c\n\n二．\n")
+        # 前の文と同じ段落のコメントは前の段落に入り、次の文が別の段落なら空行で分ける
+        self.reset_record()
+        self.cli("design", self.root, input=DESIGN)
+        self.paragraph_sentence("一．", "p1")
+        self.paragraph_block({"kind": "comment"}, "c", "p1")
+        self.paragraph_sentence("二．", "p2")
+        starts = tsuzuri._paragraph_starts(self.root, self.load("order.json"))
+        self.assertEqual([starts[sid] for sid in ("s0001", "b0001", "s0002")], [True, False, True])
+        self.assertEqual(self.article("latex"), "一．\n% c\n\n二．\n")
+        # 文書の先頭のコメントの段落が、続く文と違うときは、コメントだけで1段落になる
+        self.reset_record()
+        self.cli("design", self.root, input=DESIGN)
+        self.paragraph_block({"kind": "comment"}, "c", "p2")
+        self.paragraph_sentence("一．", "p1")
+        self.assertEqual(self.article("latex"), "% c\n\n一．\n")
 
 
 if __name__ == "__main__":

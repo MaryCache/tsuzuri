@@ -57,6 +57,45 @@ const run = code => vm.runInContext(code, ctx);
   assert.equal(run(`imageBlock('<img src=x.png '.repeat(1200))`), null);   // 閉じない <img が続いても、走査は文字数に比例する
   assert.ok(Date.now() - started < 1000);
   assert.equal(run(`imageBlock('![a](a.png)'.repeat(33))`), null);   // 画像が多すぎるブロックは描かない
+  // LaTeX の \includegraphics と \caption から相対パスを抽出し、外部 URL・PDF・コメント行は除外する
+  const texFig = '\\begin{figure}\n% \\includegraphics{../figs/commented.png}\n\\includegraphics[width=0.8\\linewidth]{../figs/arch.png}\n\\caption{構成図（\\textbf{概要}）}\n\\end{figure}';
+  assert.equal(run(`imageBlock(${JSON.stringify(texFig)})`), '<img src="/api/image?src=..%2Ffigs%2Farch.png" alt="構成図（\\textbf{概要}）" loading="lazy">');
+  const multiFig = '\\begin{figure}\\includegraphics{a.png}\\caption{図A}\\end{figure}\\begin{figure}\\includegraphics{b.jpg}\\caption{図B}\\end{figure}';
+  assert.equal(run(`imageBlock(${JSON.stringify(multiFig)})`), '<img src="/api/image?src=a.png" alt="図A" loading="lazy"><img src="/api/image?src=b.jpg" alt="図B" loading="lazy">');
+  assert.equal(run(`imageBlock(${JSON.stringify('\\includegraphics{figs/diagram.pdf}')})`), null);
+  assert.equal(run(`imageBlock(${JSON.stringify('\\includegraphics{figs/noext}')})`), null);
+  assert.match(run(`imageBlock(${JSON.stringify('\\includegraphics{https://example.com/a.png}')})`), /^<p class="img-ext">外部の画像は読み込みません:/);
+  assert.equal(run('FLAVOR_NAME.latex'), 'LaTeX');
+  assert.equal(run('BLOCK_LABEL.comment'), 'コメント行');
+  assert.equal(run('BLOCK_LABEL.math'), '数式');
+  assert.equal(run('BLOCK_LABEL.raw'), '生の記述');
+}
+// comment・math・raw ブロックの描画と、段落途中のコメント行・密着 raw が段落を切らないことを確かめる
+{
+  run(`{
+    const tags = { role: ['解説'], importance: '核', relation: '順接', technique: [], place: '依頼' };
+    const s1 = { sid: 's0001', kind: 'sentence', paragraph_start: true, versions: [{ ver: 'v001', text: '前の文。', tags }] };
+    const bCommentMid = { sid: 'b0001', kind: 'block', block: { kind: 'comment' }, paragraph_start: false,
+      versions: [{ ver: 'v001', text: '% 途中のメモ', block: { kind: 'comment' }, tags: { place: '4. 範囲と範囲外' } }] };
+    const bRawAttach = { sid: 'b0003', kind: 'block', block: { kind: 'raw', attach: true }, paragraph_start: false,
+      versions: [{ ver: 'v001', text: '\\\\label{sec:intro}', block: { kind: 'raw', attach: true }, tags: { place: '4. 範囲と範囲外' } }] };
+    const s2 = { sid: 's0002', kind: 'sentence', paragraph_start: false, versions: [{ ver: 'v001', text: '続く文。', tags }] };
+    const bCommentNext = { sid: 'b0004', kind: 'block', block: { kind: 'comment' }, paragraph_start: false,
+      versions: [{ ver: 'v001', text: '% 次段落のメモ', block: { kind: 'comment' }, tags: { place: '4. 範囲と範囲外' } }] };
+    const s3 = { sid: 's0003', kind: 'sentence', paragraph_start: true, versions: [{ ver: 'v001', text: '新段落の文。', tags }] };
+    const bMath = { sid: 'b0002', kind: 'block', block: { kind: 'math' }, paragraph_start: false,
+      versions: [{ ver: 'v001', text: 'E = mc^2', block: { kind: 'math' }, tags: { place: '4. 範囲と範囲外' } }] };
+    st.doc = { record: '/tex.tsuzuri', document: 'paper.tex', sentences: [s1, bCommentMid, bRawAttach, s2, bCommentNext, s3, bMath], retired: [],
+      retired_sentences: [], comments: [], reviews: [], requirements: [], designs: [], problems: [] };
+    st.sel = 'b0003'; st.viewVer = 'v001'; st.diff = 'off';
+    renderText(); renderDetail();
+  }`);
+  const rendered = element('text').innerHTML;
+  assert.match(rendered, /<div class="para" id="p-s0001">.*% 途中のメモ.*blk-raw.*続く文。<\/span><\/span><\/div>/);
+  assert.match(rendered, /<\/div><div class="s blk blk-comment"[^>]*aria-label="コメント行"><span class="blk-comment-body">% 次段落のメモ<\/span><\/div><div class="para" id="p-s0003">/);
+  assert.match(rendered, /blk-math.*<span class="blk-label">数式<\/span><pre><code>E = mc\^2<\/code><\/pre>/);
+  assert.match(rendered, /blk-raw.*<span class="blk-label">生の記述（密着）<\/span>/);
+  assert.match(element('detail').innerHTML, /前の要素に密着/);
 }
 run(`
   const tags = { role: ['解説'], importance: '核', relation: '順接', technique: [], place: '依頼' };

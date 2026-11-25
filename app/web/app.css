@@ -59,8 +59,8 @@ body[data-show-imp="core"] #text .s:not(.blk):not([data-imp="core"]),
 body[data-show-imp="core"] #text :is(.para, li, .blk-container):not(:has(.s:not(.blk)[data-imp="core"])),
 body[data-show-imp="sub"] #text .s:not(.blk):not([data-imp="sub"]),
 body[data-show-imp="sub"] #text :is(.para, li, .blk-container):not(:has(.s:not(.blk)[data-imp="sub"])) { display: none; }
-/* フィルター中はコードブロックも外す。コードは重要度を持たず、核の文を続けて読む流れを長いコードが切った（人の文の Issue の再現コード） */
-body[data-show-imp] #text .blk-code { display: none; }
+/* フィルター中はコード・コメント行・生の記述も外す。重要度を持たず、核の文を続けて読む流れを切るため */
+body[data-show-imp] #text :is(.blk-code, .blk-comment, .blk-raw) { display: none; }
 .s { display: block; margin: 0 -6px 10px; padding: 0 6px; border-radius: var(--radius-s); cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out); }
 .s .in { box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .s:hover { background-color: color-mix(in oklch, var(--selected) 60%, transparent); }

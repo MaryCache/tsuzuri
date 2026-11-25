@@ -16,7 +16,7 @@ This README explains why tsuzuri has the AI write its writing intent first, how 
 
 ## Japanese text only
 
-tsuzuri is made for writing and reviewing Japanese text; apart from this README, it has not been tested on English.
+tsuzuri is made for writing and reviewing Japanese text (in both Markdown and LaTeX); apart from this README, it has not been tested on English.
 The viewer app and its quick start guide are also in Japanese.
 In this README, each screen name is given in English followed by the Japanese label shown on the screen.
 
@@ -68,7 +68,7 @@ Give the answer to your AI coding agent together with the text, and it records w
 Templates and the proofreading dictionary are where you keep your rules and preferences for tsuzuri; the more you add, the closer the first draft gets to your taste (see "A reading aid that helps you put your taste into words" in the design rationale).
 
 A template sets out, for one kind of text, when to use it, the default length and register, and the outline of headings.
-tsuzuri ships three: README, 仕事の報告と提案 (work reports and proposals), and ブログとエッセイ (blogs and essays).
+tsuzuri ships four: README, 仕事の報告と提案 (work reports and proposals), ブログとエッセイ (blogs and essays), and 論文（LaTeX） (LaTeX papers).
 If you name one when you ask, as in "use the README template", the AI follows it.
 If you do not, it picks the template closest to the request, and writes without one when none fits.
 
@@ -103,7 +103,7 @@ python3 tsuzuri/app/server.py
 ```
 
 Open the address it prints in your browser; on first launch, the app opens a quick start guide in Japanese, itself written with tsuzuri.
-To open a record folder (the `<file name>.tsuzuri` folder described in "Where the record is kept, and git") that is not in your library, pass it, as in `python3 tsuzuri/app/server.py <file name>.tsuzuri`; `--port` changes the port (8770 by default).
+To open a record folder (the `<file name>.tsuzuri` folder described in "Where the record is kept, and git") that is not in your library, pass it, as in `python3 tsuzuri/app/server.py <file name>.tsuzuri`; `--port` changes the port (8770 by default), and `--image-root` sets the allowed root directory for relative images (the git repository root by default).
 
 To try it on your own text, tell your AI coding agent what you want to write and for whom, and ask it to write with tsuzuri; the result appears in the app's library (ライブラリ, the 0 key).
 

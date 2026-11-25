@@ -118,7 +118,7 @@ const verTitle = (s, x) => x.title || (x === s.versions[0] ? "初稿" : "");
 /** 選んだ文は履歴で指定したバージョンを返し、ほかの文は最新を返す。 */
 const viewed = s => s.sid === st.sel ? s.versions.find(v => v.ver === st.viewVer) ?? latest(s) : latest(s);
 const isBlock = s => s.kind === "block";
-const BLOCK_LABEL = { heading: "見出し", code: "コード", image: "画像", table: "表", note: "注記の箱", list: "箇条書き", quote: "引用", footnote: "脚注" };
+const BLOCK_LABEL = { heading: "見出し", code: "コード", image: "画像", table: "表", note: "注記の箱", list: "箇条書き", quote: "引用", footnote: "脚注", comment: "コメント行", math: "数式", raw: "生の記述" };
 const NOTE_LABEL = { info: "情報", warn: "注意", alert: "警告" };
 const blockLabel = b => BLOCK_LABEL[b.kind] || "ブロック";
 // --- 差分（直した所だけを見られるようにする）-------------------
@@ -382,6 +382,41 @@ function imageBlock(md) {
     const width = tag.match(/\bwidth\s*=\s*["']?(\d{1,4})["']?/i);
     if (src) found.push({ alt: alt ? alt[1] : "", src: src[1].trim(), width: width ? Number(width[1]) : null });
   }
+  // LaTeX の figure 環境などに記された \includegraphics[...]{パス} から、画像拡張子の相対パスだけを抽出する。
+  // % 以降のコメント行を除外し、PDF や拡張子なし指定は壊れた <img> にせず元の記述を残す
+  const TEX_IMG_EXT = /\.(?:png|jpe?g|gif|webp|svg|avif)$/i;
+  const texNoComment = md.replace(/(^|[^\\])%[^\n]*/g, "$1");
+  const extractBrace = (str, openIdx) => {
+    if (str[openIdx] !== "{") return null;
+    let depth = 0;
+    for (let i = openIdx; i < str.length && i - openIdx < 600; i++) {
+      if (str[i] === "\\" && i + 1 < str.length) { i++; continue; }
+      if (str[i] === "{") depth++;
+      else if (str[i] === "}") { depth--; if (depth === 0) return { text: str.slice(openIdx + 1, i), end: i }; }
+    }
+    return null;
+  };
+  const texCaptions = [];
+  for (let at = texNoComment.indexOf("\\caption"); at !== -1; at = texNoComment.indexOf("\\caption", at + 8)) {
+    let cur = at + 8;
+    if (texNoComment[cur] === "[") {
+      const closeSq = texNoComment.indexOf("]", cur);
+      if (closeSq === -1) break;
+      cur = closeSq + 1;
+    }
+    const braced = extractBrace(texNoComment, cur);
+    if (braced) texCaptions.push({ at, text: braced.text.trim() });
+  }
+  const incMatches = [...texNoComment.matchAll(/\\includegraphics(?:\[[^\]]*\])?\{\s*([^}\s]+)\s*\}/g)];
+  for (let idx = 0; idx < incMatches.length; idx++) {
+    const m = incMatches[idx], src = m[1].trim();
+    if (!/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(src) && !TEX_IMG_EXT.test(src)) continue;
+    const prevPos = idx > 0 ? incMatches[idx - 1].index : -1;
+    const nextPos = idx + 1 < incMatches.length ? incMatches[idx + 1].index : Infinity;
+    const cap = texCaptions.find(c => c.at > m.index && c.at < nextPos)
+      ?? [...texCaptions].reverse().find(c => c.at < m.index && c.at > prevPos);
+    found.push({ alt: cap ? cap.text : "", src, width: null });
+  }
   if (!found.length || found.length > IMAGE_COUNT_MAX) return null;
   return found.map(({ alt, src, width }) => {
     if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(src)) {
@@ -516,7 +551,8 @@ function renderText() {
   let html = "", open = false, container = null, foot = "", images = null;
   const put = str => { if (container?.foot) foot += str; else html += str; };
   const closePara = () => { if (open) { html += "</div>"; open = false; } html += foot; foot = ""; };
-  for (const s of doc.sentences) {
+  for (let i = 0; i < doc.sentences.length; i++) {
+    const s = doc.sentences[i];
     if (container && (isBlock(s) || latest(s).in !== container.sid)) { put(container.end); container = null; }
     if (isBlock(s)) {
       // 見出しは文と同じく mdInline を通す（太字・決まった形のタグ）。コードや表の中身は下で別に描く
@@ -525,6 +561,28 @@ function renderText() {
       if (b.kind === "footnote") {
         foot += `<div class="blk-container blk-footnote"><span ${attrs}><span class="blk-label">${blockLabel(b)} ${esc(b.label)}</span></span>`;
         container = { sid: s.sid, kind: b.kind, end: "</div>", foot: true };
+        continue;
+      }
+      if (b.kind === "comment") {
+        // コメント行は段落を切らない。次に続く文が新しい段落の始まりなら、次の段落の頭へ寄せるため直前の段落を閉じる
+        let nextSent = null;
+        for (let j = i + 1; j < doc.sentences.length; j++) {
+          const cand = doc.sentences[j];
+          if (!isBlock(cand)) { nextSent = cand; break; }
+          if (viewed(cand).block?.kind !== "comment") break;
+        }
+        const startsNext = !nextSent ? false : Boolean(nextSent.paragraph_start);
+        const cAttrs = `${attrs} aria-label="コメント行"`;
+        if (open && !startsNext) {
+          put(`<span ${cAttrs}><span class="blk-comment-body">${text}</span></span>`);
+        } else {
+          closePara();
+          html += `<div ${cAttrs}><span class="blk-comment-body">${text}</span></div>`;
+        }
+        continue;
+      }
+      if (b.kind === "raw" && b.attach && open) {
+        put(`<span ${attrs}><span class="blk-label">${blockLabel(b)}（密着）</span><pre><code>${text}</code></pre></span>`);
         continue;
       }
       closePara();
@@ -545,6 +603,9 @@ function renderText() {
         html += `<div ${attrs}>${mdTable(viewed(s).text)}</div>`;
       } else if (b.kind === "image" && (images = imageBlock(viewed(s).text))) {
         html += `<div ${attrs}><figure class="blk-img">${images}</figure></div>`;
+      } else if (b.kind === "math" || b.kind === "raw") {
+        const label = b.kind === "raw" && b.attach ? `${blockLabel(b)}（密着）` : blockLabel(b);
+        html += `<div ${attrs}><span class="blk-label">${label}</span><pre><code>${text}</code></pre></div>`;
       } else {
         html += `<div ${attrs}>${b.kind === "code" && b.lang ? `<span class="blk-label">${esc(b.lang)}</span>` : ""}<pre>${b.kind === "code" ? `<code>${text}</code>` : text}</pre></div>`;
       }
@@ -615,7 +676,7 @@ function renderDetail() {
     ${v.deviation ? `<div class="dev"><h4 class="k">${ic("arrow-right-left")}変更理由</h4>${esc(v.deviation)}</div>` : ""}${intentDiff(s, v)}</section>`;
   const attrs = block ? [block.kind === "heading" && `段 ${block.level}`, block.kind === "code" && block.lang && `言語 ${block.lang}`,
     block.kind === "note" && NOTE_LABEL[block.type], block.kind === "list" && (block.ordered ? "番号あり" : "番号なし"),
-    block.kind === "footnote" && `ラベル ${block.label}`].filter(Boolean) : [];
+    block.kind === "footnote" && `ラベル ${block.label}`, block.kind === "raw" && block.attach && "前の要素に密着"].filter(Boolean) : [];
   const roles = block ? `<section data-k="kind"><h3 class="k">種類</h3><p class="memo">${esc([blockLabel(block), ...attrs].join("・"))}</p></section>`
     : `<section data-k="roles"><h3 class="k">${ic("tags")}文機能<span class="kb kb-at" aria-hidden="true">← → で要素へ</span></h3>${funcProse(v)}</section>`;
   const refs = refsHTML(v);
@@ -1717,13 +1778,20 @@ document.addEventListener("keydown", e => {
 // 本文コピー（頭の frontmatter を付けるか外すかを選べる）。中身はサーバーが export と同じ規則で作る（/api/markdown）。
 // 「本文だけ」は頭の frontmatter を外す。題とタグを別の欄で入れる投稿画面の、本文の欄に貼る分。
 // 方言は注記の箱の書き方だけを変える（各媒体の方言に汎用的に対応できるようにするため）。選んだ方言はこの画面を見る人の手元に覚える
+const FLAVOR_NAME = { gfm: "GitHub", qiita: "Qiita", zenn: "Zenn", latex: "LaTeX" };
 let flavor = "gfm";
-try { flavor = localStorage.getItem("tsuzuri-flavor") || "gfm"; } catch {}
-const paintFlavor = () => document.querySelectorAll("[data-flavor]").forEach(b => b.setAttribute("aria-checked", String(b.dataset.flavor === flavor)));
+try { const saved = localStorage.getItem("tsuzuri-flavor"); if (saved && Object.hasOwn(FLAVOR_NAME, saved)) flavor = saved; } catch {}
+const paintFlavor = () => {
+  document.querySelectorAll("[data-flavor]").forEach(b => b.setAttribute("aria-checked", String(b.dataset.flavor === flavor)));
+  const isTex = flavor === "latex";
+  const allSub = document.querySelector('[data-copy="all"] .sub'), bodySub = document.querySelector('[data-copy="body"] .sub');
+  if (allSub) allSub.textContent = isTex ? "プリアンブルつき" : "frontmatter つき";
+  if (bodySub) bodySub.textContent = isTex ? "プリアンブルを除外" : "frontmatter を除外";
+};
 paintFlavor();
 document.addEventListener("click", e => {
   const f = e.target.closest("[data-flavor]");
-  if (!f) return;
+  if (!f || !Object.hasOwn(FLAVOR_NAME, f.dataset.flavor)) return;
   flavor = f.dataset.flavor; paintFlavor();
   try { localStorage.setItem("tsuzuri-flavor", flavor); } catch {}
 });
@@ -1750,13 +1818,17 @@ document.addEventListener("click", async e => {
   const item = e.target.closest("[data-copy]");
   if (!item) { if (!e.target.closest("#copy-menu")) copyMenu(false); return; }
   copyMenu(false);
+  // クリック時点の方言と種別を固定し、取得中の切り替えで応答の解釈がずれないようにする
+  const chosenFlavor = flavor, copyKind = item.dataset.copy;
   try {
-    const r = await fetch(`/api/markdown?flavor=${encodeURIComponent(flavor)}`), body = await r.json();
+    const r = await fetch(`/api/markdown?flavor=${encodeURIComponent(chosenFlavor)}`), body = await r.json();
     if (!r.ok) throw new Error(body.error);
-    const text = item.dataset.copy === "body" ? body.markdown.replace(/^---\n[\s\S]*?\n---\n+/, "") : body.markdown;
+    const text = copyKind === "body"
+      ? (typeof body.body === "string" ? body.body : body.markdown.replace(/^---\n[\s\S]*?\n---\n+/, ""))
+      : body.markdown;
     await navigator.clipboard.writeText(text);
-    const name = { gfm: "GitHub", qiita: "Qiita", zenn: "Zenn" }[flavor];
-    toast(`${item.dataset.copy === "body" ? "本文だけ" : "記事全部"}を ${name} の記法でコピーした`);
+    const name = FLAVOR_NAME[chosenFlavor] ?? chosenFlavor;
+    toast(`${copyKind === "body" ? "本文だけ" : "記事全部"}を ${name} の記法でコピーした`);
   } catch (err) { toast(`コピーできなかった。${err.message}`); }
 });
 document.addEventListener("keydown", e => {

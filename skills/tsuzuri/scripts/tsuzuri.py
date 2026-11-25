@@ -2,6 +2,7 @@
 """文より先にメモを残し、書き換えないバージョンを積む記録用 CLI。"""
 
 import argparse
+import bisect
 from contextlib import contextmanager
 import hashlib
 import json
@@ -31,7 +32,9 @@ TECHNIQUES = set("シャレード 描写 記号での回収 フォーカスの�
 CONTAINERS = {"note", "list", "quote", "footnote"}
 # 注記の箱の書き方は媒体ごとに違うので、記録は意味（info＝情報・warn＝注意・alert＝警告）で持ち、書き出しで方言に変える。
 # 既定は GitHub の Markdown。Zenn の箱は2種類しかないので、注意と警告はどちらも alert にする
-FLAVORS = ("gfm", "qiita", "zenn")
+FLAVORS = ("gfm", "qiita", "zenn", "latex")
+# 本文の字を日本語の文として検査しないブロック。comment は読み手に見えず、math と raw は LaTeX の記述で、code と同じく校正辞書や文の検査にかけると記号やコマンド名が雑音になる
+VERBATIM_KINDS = {"code", "comment", "math", "raw"}
 NOTE_OPEN = {
     "gfm": {"info": "> [!NOTE]", "warn": "> [!WARNING]", "alert": "> [!CAUTION]"},
     "qiita": {"info": ":::note info", "warn": ":::note warn", "alert": ":::note alert"},
@@ -43,6 +46,16 @@ FOOTNOTE_LABEL = re.compile(r"[A-Za-z0-9_-]+")
 FOOTNOTE_REFERENCE = re.compile(r"\[\^([^\]\s]+)\](?!:)")
 # インラインコード（`…`）の中の [^ラベル] は呼び出しではなく、書き方の説明（SKILL.md 自身の記録で見つかった）
 INLINE_CODE = re.compile(r"`[^`]*`")
+_FULLWIDTH_PUNCT = str.maketrans("，．", "、。")
+
+
+def _norm_punct(text):
+    """検査にかける前に、全角のカンマ・ピリオド（，．）を句読点（、。）へそろえる。
+
+    技術文書では「，．」で書く利用者がいて、「、。」だけを前提にした検査（読点の数・接続語・動作主・主題）が素通りするため。
+    1字を1字に替えるため位置は変わらず、見つけた語は元の文から同じ位置で切り出せる。記録と書き出しの本文には使わない。
+    """
+    return text.translate(_FULLWIDTH_PUNCT)
 
 
 def _identifier(value, prefix, width):
@@ -359,8 +372,11 @@ def _validate_block(block, text):
     if not isinstance(block, dict) or not isinstance(block.get("kind"), str):
         raise ValueError("block.kind にブロックの種類を指定してください")
     kind = block["kind"]
-    if kind not in CONTAINERS | {"heading", "code", "image", "table"}:
+    if kind not in CONTAINERS | {"heading", "code", "image", "table", "comment", "math", "raw"}:
         raise ValueError(f"ブロックの種類が不正です: {kind}")
+    # 直前のチャンクへ密着させるかを真偽値で持つ。文字列の "false" などが真に読まれて、段落の区切りが黙って消えるのを防ぐ
+    if kind == "raw" and "attach" in block and type(block["attach"]) is not bool:
+        raise ValueError("block.attach は真偽値にしてください")
     if kind == "heading" and (type(block.get("level")) is not int or not 1 <= block["level"] <= 4):
         raise ValueError("block.level は 1〜4 の整数にしてください")
     if kind == "code" and not isinstance(block.get("lang"), str):
@@ -645,18 +661,23 @@ def _words(root, order):
     """最新のバージョンの文・執筆意図・ブロックの字に校正辞書を当て、当たった所を1行ずつ出す。当たった数を返す。
 
     直すかどうかは書き手が前後を読んで決める（「お題」の題や本物の窓のような、同じ字で別の意味の語があるため）。
+    code・comment・math・raw ブロックの本文は当てない（執筆意図は当てる）。
     """
     rules = _word_rules()
     hits = 0
     for sid in order["order"]:
         unit = _latest(root, sid)
         memo_path = _sentence_path(root, sid, unit["ver"]).with_name(f"{unit['ver']}-memo.json")
-        parts = [("見出しや箱の字" if sid.startswith("b") else "文", unit.get("text") or "")]
+        parts = []
+        if _block_kind(unit) not in VERBATIM_KINDS:
+            # 数式・参照・\texttt の中は日本語の文ではないため、同じ長さの空白で潰し、位置を保ったまま辞書の当たりから外す
+            parts.append(("見出しや箱の字" if sid.startswith("b") else "文", unit.get("text") or "", _mask_tex(unit.get("text") or "")))
         if memo_path.is_file():
-            parts.append(("執筆意図", _read_json(memo_path).get("text") or ""))
-        for part, text in parts:
+            memo = _read_json(memo_path).get("text") or ""
+            parts.append(("執筆意図", memo, memo))
+        for part, text, searched in parts:
             for pattern, fix, note, source in rules:
-                for found in pattern.finditer(text):
+                for found in pattern.finditer(searched):
                     context = text[max(0, found.start() - 12):found.end() + 12]
                     print(f"{sid} {unit['ver']} {part}: 「{found.group(0)}」→ {fix}{f'（{note}）' if note else ''} [{source}] …{context}…")
                     hits += 1
@@ -1075,12 +1096,13 @@ def _load(root, order):
     for sid, unit, _ in sorted(sentences, key=lambda item: -len(_visible(item[1]["text"]))):
         shown = _visible(unit["text"])
         if len(shown) > LONG_SENTENCE:
-            print(f"{sid} {len(shown)}字 読点 {shown.count('、')}")
+            print(f"{sid} {len(shown)}字 読点 {_norm_punct(shown).count('、')}")
 
     print("## 読点の多い文（3つ以上）")
     for sid, unit, _ in sentences:
-        if _visible(unit["text"]).count("、") >= 3:
-            print(f"{sid} 読点 {_visible(unit['text']).count('、')}")
+        commas = _norm_punct(_visible(unit["text"])).count("、")
+        if commas >= 3:
+            print(f"{sid} 読点 {commas}")
 
     print(f"## 前の段落の言い直し（中心語の再利用 {RESTATE_THRESHOLD:.2f} 以上・references/cold-read.md の型5）")
     for group, core, count in _restate(sentences):
@@ -1097,7 +1119,7 @@ def _load(root, order):
 
     print("## 途中で変わる動作主（「〜し、〜すると、〜が…」。前半の省いた動作主と、後半の主語が同じ文に入っていないか）")
     for sid, unit, _ in sentences:
-        if _ACTOR_SHIFT.match(unit["text"].strip()):
+        if _ACTOR_SHIFT.match(_norm_punct(unit["text"].strip())):
             print(f"{sid} {unit['text'][:40]}…")
 
     print("## 主題と述語の同じ語（「〇〇の××は、△△の××です」は、述語を動詞で言い切る形に直せないか）")
@@ -1142,16 +1164,19 @@ def _repeats(sentences):
     found, previous = [], None
     for sid, unit, _ in sentences:
         text, para = unit["text"], unit.get("para")
+        # 判定は句読点をそろえた文で行い、挙げる語は元の文から切り出す（「，」を使う文の語をそのまま見せるため）
+        normalized = _norm_punct(text)
         # 同じ語のくり返しを全部挙げると、別のものを指す同じ語（直す前のバージョンと新しいバージョン）まで拾い、
         # 「その文」のような短い受け直しは自然なこそあど言葉なので挙げない。並べた語ごと受け直す所（「項目や段落を選ぶと、
         # その項目や段落を」）だけを挙げる。「それ」の一語で足りる
-        twice = [m.group(1) for m in _PAIR_AGAIN.finditer(text) if m.group(1) in text[:m.start()]]
+        twice = [text[m.start(1):m.end(1)] for m in _PAIR_AGAIN.finditer(normalized) if m.group(1) in normalized[:m.start()]]
         if twice:
             found.append((sid, "並べた語を「その」で受け直している: " + "・".join(f"「その{t}」" for t in twice)))
-        topic = _LEADING_TOPIC.match(text)
-        if topic and previous and previous[0] == para and previous[1] == topic.group(1):
-            found.append((sid, f"直前の文と同じ主題: 「{topic.group(1)}は」"))
-        previous = (para, topic.group(1) if topic else None)
+        topic = _LEADING_TOPIC.match(normalized)
+        topic_word = text[topic.start(1):topic.end(1)] if topic else None
+        if topic and previous and previous[0] == para and previous[1] == topic_word:
+            found.append((sid, f"直前の文と同じ主題: 「{topic_word}は」"))
+        previous = (para, topic_word)
     return found
 
 
@@ -1175,15 +1200,18 @@ def _topic_echo(sentences):
     """主題の末尾の語が、文末の「〜です」「〜だ」の直前にもう一度出る文を (文の ID, 語) で返す。合否は出さない。"""
     found = []
     for sid, unit, _ in sentences:
+        # 照合は句読点をそろえた文で行う。主題の語は「、。」を含まない範囲のため、元の文と同じ位置の字がそのまま語になる
         text = unit["text"].strip()
-        topic, copula = _TOPIC_HEAD.match(text), _COPULA_END.search(text)
+        normalized = _norm_punct(text)
+        topic, copula = _TOPIC_HEAD.match(normalized), _COPULA_END.search(normalized)
         if not topic or not copula:
             continue
-        body = text[:copula.start()]
+        body = normalized[:copula.start()]
+        topic_text = text[topic.start(1):topic.end(1)]
         # 末尾の語の長さは決められないので、主題の末尾の1〜4字を長い順に試し、述語の直前と同じなら挙げる
         for size in (4, 3, 2, 1):
-            word = topic.group(1)[-size:]
-            if len(topic.group(1)) >= size and body.endswith(word) and len(body) > len(topic.group(0)) + size:
+            word = topic_text[-size:]
+            if len(topic_text) >= size and body.endswith(word) and len(body) > len(topic.group(0)) + size:
                 found.append((sid, word))
                 break
     return found
@@ -1217,7 +1245,12 @@ def _new_topics(root, order):
     """並びの順に、その語が初めて出る文で「語は」の主題になっている所を (文の ID, 語) で返す。"""
     seen, found = set(), []
     for sid in order["order"]:
-        text = _latest(root, sid).get("text") or ""
+        unit = _latest(root, sid)
+        # コマンド名（begin・section など）が「既に出た語」や主題に紛れないよう、日本語の文でないブロックは語の追跡から外し、
+        # 残りは読み手に見える字だけで調べる
+        if _block_kind(unit) in VERBATIM_KINDS:
+            continue
+        text = _visible(unit.get("text") or "")
         for match in _TOPIC.finditer(text):
             word = match.group(1)
             earlier = text[:match.start(1)]
@@ -1232,7 +1265,7 @@ def _new_topics(root, order):
 # 意味の崩れの検査で比べる語。nihongo（AnIT012/nihongo）の revert_broken.py の考え方を借りた。推敲や語の直しで、
 # 否定・数値・確かさ・強さが変わった文は、言い回しの直しではなく意味の直しになっている。語の一覧は tsuzuri で選んだ。
 _DRIFT_KINDS = (
-    ("否定", re.compile(r"ない|ません|ず[、。に]|ぬ|無い|無し|不[可要]|非")),
+    ("否定", re.compile(r"ない|ません|ず[、，。．に]|ぬ|無い|無し|不[可要]|非")),
     ("数値", re.compile(r"[0-9０-９]+(?:\.[0-9]+)?|[一二三四五六七八九十百千万]+(?:つ|件|人|回|日|か月|年|字|行|段)")),
     ("確かさ", re.compile(r"かもしれ|はず|予定|推定|見込み|可能性|と思|らしい|ようだ|でしょう|場合があ|ことがあ")),
     ("強さ", re.compile(r"必ず|すべて|全部|全て|常に|絶対|だけ|しか|べき|ください|てはいけ|禁止|任意|推奨|大幅|かなり")),
@@ -1254,9 +1287,15 @@ def _drift(root, order, since=None):
             continue
         before, after = _read_json(baseline)["text"], _read_json(versions[-1])["text"]
         for kind, pattern in _DRIFT_KINDS:
-            old, new = sorted(pattern.findall(before)), sorted(pattern.findall(after))
-            if old != new:
+            old, new = _drift_matches(pattern, before), _drift_matches(pattern, after)
+            # 句読点の字だけを変えた直しは意味の変化ではないので、「ず、」と「ず，」を同じものとして比べる
+            if sorted(_norm_punct(word) for word in old) != sorted(_norm_punct(word) for word in new):
                 print(f"{sid} {baseline.stem}→{versions[-1].stem} {kind}: {old} → {new}")
+
+
+def _drift_matches(pattern, text):
+    """句読点をそろえた文で pattern を探し、見つけた語を元の文の字のまま並べ替えて返す（利用者の字で見せるため）。"""
+    return sorted(text[match.start():match.end()] for match in pattern.finditer(_norm_punct(text)))
 
 
 def _examples():
@@ -1307,14 +1346,17 @@ _INLINE_CODE = re.compile(r"`[^`]*`")
 
 
 def _potential_hits(root, order):
-    """文・見出し・表の字から、可能動詞の短い形の候補を (ID, 語) で返す。コードの箱とインラインのコードは見ない。"""
+    """文・見出し・表の字から、可能動詞の短い形の候補を (ID, 語) で返す。
+
+    コード・コメント・数式・生の記述のブロックと、インラインのコード・LaTeX の参照・数式の中は見ない。
+    """
     hits = []
     for sid in order["order"]:
         unit = _latest(root, sid)
-        block = unit.get("block") if sid.startswith("b") else None
-        if isinstance(block, dict) and block.get("kind") == "code":
+        if _block_kind(unit) in VERBATIM_KINDS:
             continue
-        for match in _SHORT_POTENTIAL.finditer(_INLINE_CODE.sub("", unit.get("text") or "")):
+        # LaTeX の記述は削らず空白で潰し、削って前後の字がつながって別の語に見える（読＋める）のを防ぐ
+        for match in _SHORT_POTENTIAL.finditer(_mask_tex(_INLINE_CODE.sub("", unit.get("text") or ""))):
             hits.append((sid, match.group(0)))
     return hits
 
@@ -1332,11 +1374,15 @@ CANDIDATES = {
 }
 
 def _connectives(text):
-    """文の中の接続語・接続助詞を (種類, 語, 位置) で返す。"""
+    """文の中の接続語・接続助詞を (種類, 語, 位置) で返す。
+
+    句読点をそろえた文で探し、語は元の文から切り出す（「ても，」のように利用者の字のまま見せるため）。
+    """
     found = []
+    normalized = _norm_punct(text)
     for kind, pattern in _CONNECTIVE_PATTERNS:
-        for match in pattern.finditer(text):
-            found.append((kind, match.group(0), match.start()))
+        for match in pattern.finditer(normalized):
+            found.append((kind, text[match.start():match.end()], match.start()))
     return sorted(found, key=lambda item: item[2])
 
 
@@ -1372,14 +1418,205 @@ _FN_REF = re.compile(r"\[\^[^\]]+\]")
 _WIKILINK = re.compile(r"\[\[#?([^\]|]+)(?:\|([^\]]+))?\]\]")
 
 
+# LaTeX の記法。数式は読み手に日本語の文として読まれず、参照は番号に置き換わる字のため、見える字から外す。
+# 数式の「$」は Pandoc と同じ規則で見分ける（開く「$」の右と閉じる「$」の左は空白でなく、閉じる「$」の右は数字でない）。
+# 「$5 と $10」のような値段の書き方を数式と取り違えないため。「\$」と「$$」（ディスプレイ数式）は対象にしない
+_TEX_INLINE_MATH = re.compile(r"(?<![\\$])\$(?![\s$])(?:\\.|[^$\\])*?(?<![\s\\])\$(?![\d$])")
+# 参照と装飾の命令を正規表現の繰り返しで探すと、閉じ括弧の無い入力（\cite[ や \( を2万回並べた文）で
+# 開きごとに末尾まで走査して二乗になる。そのため波括弧の対応を1回の走査で表にし、命令ごとに表を引く形で読む
+_TEX_REFERENCE_NAMES = frozenset(("cite", "citep", "citet", "ref", "eqref", "pageref", "autoref", "cref", "Cref", "label", "url"))
+# 中身が日本語の文のまま読まれる装飾。入れ子（\textbf{\emph{…}}）も中まで外す
+_TEX_STYLE_NAMES = frozenset(("textbf", "textit", "emph", "underline", "textrm", "textsf", "texttt", "text"))
+# 装飾を外す入れ子の深さの上限。これを超えた中身は外さずにそのまま残し、再帰の深さと走査の量を抑える
+_TEX_MAX_DEPTH = 8
+_TEX_COMMAND_NAME = re.compile(r"[A-Za-z]+")
+# 「\」とその次の1字は1組として読み、「\{」「\}」を括弧に数えない
+_TEX_BRACES = re.compile(r"\\.|[{}]", re.DOTALL)
+# 退避したインラインコードの目印。私用領域の字で挟み、文の中の字とぶつからないようにする
+_CODE_MARK = re.compile("(\\d+)")
+
+
+def _block_kind(unit):
+    """ブロックの種類を返す。文と、種類を読めないブロックは None。"""
+    block = unit.get("block")
+    return block.get("kind") if isinstance(block, dict) else None
+
+
+class _TexIndex:
+    """1つの文字列について、波括弧の対応と「]」の位置を1回の走査で作って持つ。命令ごとの照合を定数時間で行うため。"""
+
+    def __init__(self, text):
+        self.text = text
+        self.pairs = {}   # 開く「{」の位置 → 対応する「}」の位置。閉じの無い「{」は載せない
+        stack = []
+        for match in _TEX_BRACES.finditer(text):
+            char = match.group(0)
+            if char == "{":
+                stack.append(match.start())
+            elif char == "}" and stack:
+                self.pairs[stack.pop()] = match.start()
+        self._brackets = None
+
+    def next_bracket(self, position):
+        """position 以降で最初の「]」の位置を返す。無ければ None。開きごとに末尾まで探し直さないよう、位置の一覧を二分探索する。"""
+        if self._brackets is None:
+            self._brackets = [match.start() for match in re.finditer(r"\]", self.text)]
+        found = bisect.bisect_left(self._brackets, position)
+        return self._brackets[found] if found < len(self._brackets) else None
+
+    def argument_end(self, position):
+        """position から「[…]」の任意引数を0個以上読み飛ばし、次の位置を返す。閉じの無い「[」の手前で止まる。"""
+        while position < len(self.text) and self.text[position] == "[":
+            close = self.next_bracket(position + 1)
+            if close is None:
+                break
+            position = close + 1
+        return position
+
+    def group_end(self, position, limit):
+        """position が「{」で、対応する「}」が limit までに収まるなら、その次の位置を返す。そうでなければ None。"""
+        close = self.pairs.get(position) if position < limit else None
+        return close + 1 if close is not None and close < limit else None
+
+    def reference_end(self, position, limit):
+        """参照の命令（\\cite[…]{…} など）の名前の次の位置から、引数の終わりを返す。引数が揃わなければ None。"""
+        return self.group_end(self.argument_end(position), limit)
+
+
+def _tex_blank_commands(text):
+    """\\texttt{…} と参照の命令を、同じ長さの空白に替える。位置を保つため。"""
+    if "\\" not in text:
+        return text
+    index = _TexIndex(text)
+    pieces, last, position = [], 0, 0
+    while True:
+        start = text.find("\\", position)
+        if start < 0:
+            break
+        name = _TEX_COMMAND_NAME.match(text, start + 1)
+        if not name:
+            position = start + 2   # 「\\」や「\$」のように名前の無い組は命令でないので読み飛ばす
+            continue
+        position = name.end()
+        word = name.group(0)
+        if word == "texttt":
+            end = index.group_end(position, len(text))
+        elif word in _TEX_REFERENCE_NAMES:
+            end = index.reference_end(position, len(text))
+        else:
+            continue
+        if end is not None:
+            pieces += [text[last:start], " " * (end - start)]
+            last = position = end
+    pieces.append(text[last:])
+    return "".join(pieces)
+
+
+def _tex_unwrap(index, low, high, depth):
+    """text[low:high] から、参照を消し、\\href は表示名に、装飾は中身に替える。入れ子は _TEX_MAX_DEPTH まで中を読む。"""
+    text = index.text
+    if depth > _TEX_MAX_DEPTH:
+        return text[low:high]
+    pieces, last, position = [], low, low
+    while True:
+        start = text.find("\\", position, high)
+        if start < 0:
+            break
+        name = _TEX_COMMAND_NAME.match(text, start + 1, high)
+        if not name:
+            position = start + 2
+            continue
+        position = name.end()
+        word = name.group(0)
+        end = replacement = None
+        if word in _TEX_REFERENCE_NAMES:
+            end, replacement = index.reference_end(position, high), ""
+        elif word == "href":
+            url_end = index.group_end(position, high)
+            end = index.group_end(url_end, high) if url_end is not None else None
+            if end is not None:
+                replacement = _tex_unwrap(index, url_end + 1, end - 1, depth + 1)
+        elif word in _TEX_STYLE_NAMES:
+            end = index.group_end(position, high)
+            if end is not None:
+                replacement = _tex_unwrap(index, position + 1, end - 1, depth + 1)
+        if end is not None:
+            pieces += [text[last:start], replacement]
+            last = position = end
+    pieces.append(text[last:high])
+    return "".join(pieces)
+
+
+def _tex_paren_math(text, fill):
+    """\\(…\\) を fill(その字列) に替える。閉じが無ければ以降の開きにも閉じが無いので、そこで打ち切る（走査は1回だけ）。"""
+    pieces, last = [], 0
+    while True:
+        start = text.find("\\(", last)
+        if start < 0:
+            break
+        end = text.find("\\)", start + 2)
+        if end < 0:
+            break
+        pieces += [text[last:start], fill(text[start:end + 2])]
+        last = end + 2
+    pieces.append(text[last:])
+    return "".join(pieces)
+
+
+def _blank(text):
+    return " " * len(text)
+
+
+def _mask_tex(text):
+    """インラインの LaTeX（\\texttt・参照・数式）を同じ長さの空白に替える。
+
+    校正辞書や可能動詞の検査から外しつつ、見つけた位置を元の文と同じに保つため。削ると前後の字がつながって別の語に見える。
+    インラインコード（`…`）の中は LaTeX として読まない。「`$HOME`と`$PATH`」の2つの「$」を数式の開きと閉じに取り違え、間の「と」まで消すため。
+    """
+    pieces, last = [], 0
+    for code in INLINE_CODE.finditer(text):
+        pieces += [_mask_tex_plain(text[last:code.start()]), code.group(0)]
+        last = code.end()
+    pieces.append(_mask_tex_plain(text[last:]))
+    return "".join(pieces)
+
+
+def _mask_tex_plain(text):
+    """コードの外の字を、命令・インライン数式・\\(…\\) の順に空白へ替える。"""
+    return _tex_paren_math(_TEX_INLINE_MATH.sub(lambda match: _blank(match.group(0)), _tex_blank_commands(text)), _blank)
+
+
 def _visible(text):
-    """読み手に見える字だけを返す。HTML のタグ・リンクの URL・裸の URL・脚注の呼び出し・太字の記号を外す。
+    """読み手に見える字だけを返す。HTML のタグ・リンクの URL・裸の URL・脚注の呼び出し・太字の記号・LaTeX の記法を外す。
 
     長い文・読点・言い直しの中心語を数えるときに使う。色分けを span で書いた構想の文書で、タグの字（span・style・color と色の値）が
     長さと中心語に数えられ、長い文の上位と言い直しの候補が雑音で埋まった。
+    LaTeX は数式と参照（\\cite・\\ref・\\label・\\url など）を消し、\\href は表示名、\\textbf などの装飾は中身を残す。
+    \\href の URL を裸の URL として先に消すと、閉じ括弧ごと表示名まで消えるため、LaTeX の処理は Markdown と HTML より前に行う。
+    インラインコード（`…`）は目印に替えて退避し、最後にそのまま戻す。「`$HOME`」や「`<番号>`」の中身を、数式やタグと取り違えて消さないため。
     """
-    text = _LINK.sub(r"\1", _WIKILINK.sub(lambda m: m.group(2) or m.group(1), text))
-    return _FN_REF.sub("", _URL.sub("", _TAG.sub("", text))).replace("**", "").replace("==", "")
+    held = []
+
+    def hold(match):
+        held.append(match.group(0))
+        return f"\ue000{len(held) - 1}\ue001"
+
+    text = INLINE_CODE.sub(hold, text)
+    text = _tex_paren_math(_TEX_INLINE_MATH.sub("", text), lambda _: "")
+    if "\\" in text:
+        text = _tex_unwrap(_TexIndex(text), 0, len(text), 0)
+    # 以降の正規表現は、閉じの記号が文のどこにも無い入力で開きごとに末尾まで走査する。先に閉じの有無を見て、無ければ走らせない
+    if "[[" in text:
+        text = _WIKILINK.sub(lambda m: m.group(2) or m.group(1), text)
+    if "](" in text:
+        text = _LINK.sub(r"\1", text)
+    if "<" in text and ">" in text:
+        text = _TAG.sub("", text)
+    text = _URL.sub("", text)
+    if "[^" in text:
+        text = _FN_REF.sub("", text)
+    text = text.replace("**", "").replace("==", "")
+    return _CODE_MARK.sub(lambda match: held[int(match.group(1))], text) if held else text
 
 
 def _restate(sentences):
@@ -1424,6 +1661,9 @@ def _cold(root, order):
         if sid.startswith("b"):
             block = unit.get("block") or {}
             kind = block.get("kind", "ブロック")
+            if kind == "comment":
+                # コメントは書き出した記事で読み手に見えない。渡すと、読み手が見えない行を本文と取り違える
+                continue
             label = "#" * int(block.get("level", 2)) + " " if kind == "heading" else f"（{kind}）"
             if kind in ("list", "quote", "note"):
                 # 中の文は入れ物の下に印を付けて並べる。印が無いと、読み手は入れ物を中身の見えない箱と読み、中の文を本文の言い直しと取り違える
@@ -1518,24 +1758,39 @@ def _footnote_blocks(root, order):
     return found
 
 
+def _is_inline_block(unit):
+    """段落を切らないブロックか。コメントと、直前のチャンクに密着させる生の記述（attach）が当たる。"""
+    block = unit.get("block")
+    return isinstance(block, dict) and (block.get("kind") == "comment" or (block.get("kind") == "raw" and bool(block.get("attach"))))
+
+
 def _paragraph_starts(root, order):
     """並びの各 ID について、文が段落を始めるかを共通の規則で返す。"""
     has_design = bool(_designs(root))
     footnotes = _footnote_blocks(root, order)
     starts, previous = {}, None
+    # 続く文が別の段落かを比べる先の段落の番号。直前の文のほか、段落の番号を持つコメントも数える。
+    # _article はそのコメントの段落で段落を切るため、ここでも数えないと、書き出しの空行と段落の始まりの判定が食い違う
+    last_para = None
     for sid in order["order"]:
         unit = _latest(root, sid)
         if sid in footnotes or unit.get("in") in footnotes:
             # 脚注は書き出しで本文の末尾へ移るので、前後の本文の文のつながりを変えない
             starts[sid] = False
             continue
+        if _is_inline_block(unit):
+            # コメントと密着させる生の記述は、文のあいだに挟まっても段落を切らない（LaTeX の % 行や \label が文の途中にある）
+            starts[sid] = False
+            if has_design and _block_kind(unit) == "comment" and unit.get("para") is not None:
+                last_para = unit["para"]
+            continue
         starts[sid] = sid.startswith("s") and (
             previous is None or previous["sid"].startswith("b")
             or (unit.get("in") is not None and unit["in"] != previous.get("in"))
-            or (unit.get("para") != previous.get("para") if has_design and unit.get("para") is not None
+            or (unit.get("para") != last_para if has_design and unit.get("para") is not None
                 else unit["tags"]["relation"] == "段落の始まり")
         )
-        previous = unit
+        previous, last_para = unit, unit.get("para")
     return starts
 
 
@@ -1617,38 +1872,199 @@ def _check_footnotes(root, order):
     return problems
 
 
-def _article(root, order, flavor="gfm"):
-    """付帯情報と文・ブロックを記事の Markdown にして返す。脚注は本文の末尾にまとめる。アプリの本文コピーも同じ中身を使う。
+# LaTeX で見出しのレベル（1〜4）に当てる命令。4段目は段落見出しにする（\subsubsection の下は番号を付けない慣習のため）
+LATEX_HEADINGS = {1: "section", 2: "subsection", 3: "subsubsection", 4: "paragraph"}
+# 注記の箱は外部パッケージに頼らず引用の環境で書くので、種類は先頭の太字の語で示す（LaTeX のコメントは組版に出ない）
+LATEX_NOTE_LABEL = {"info": "Note", "warn": "Warning", "alert": "Caution"}
+# 「\%」でない「%」。LaTeX は行末までをコメントとして読み捨てるため、本文に裸で入ると以降の字が組版から消える
+_BARE_PERCENT = re.compile(r"(?<!\\)%")
 
-    flavor は書き出す媒体の方言（FLAVORS）。記録の形は媒体によらず同じで、注記の箱の書き方だけが変わる。
+
+def _footnote_bodies(root, order):
+    """脚注のラベルから、その脚注の本文（中の文をつなげたもの）を引く表を返す。LaTeX で \\footnote{…} に展開するために使う。"""
+    ids, bodies = order["order"], {}
+    for index, sid in enumerate(ids):
+        if not sid.startswith("b"):
+            continue
+        block = _latest(root, sid).get("block")
+        if not (isinstance(block, dict) and block.get("kind") == "footnote"):
+            continue
+        parts = []
+        for child_id in ids[index + 1:]:
+            child = _latest(root, child_id)
+            if child_id.startswith("b") or child.get("in") != sid:
+                break
+            parts.append(child["text"])
+        bodies[block["label"]] = "".join(parts)
+    return bodies
+
+
+def _inline_footnotes(text, bodies, counts=None):
+    """文の中の [^ラベル] を \\footnote{本文} に展開する。インラインコードの中と、対応する脚注が無い呼び出しはそのまま。
+
+    counts を渡すと、展開したラベルごとの回数を数える（同じ脚注を2回呼ぶ記録を、書き出しで知らせるため）。
+    """
+    def replace(match):
+        label = match.group(1)
+        if label not in bodies:
+            return match.group(0)
+        if counts is not None:
+            counts[label] = counts.get(label, 0) + 1
+        return f"\\footnote{{{bodies[label]}}}"
+
+    def expand(piece):
+        return FOOTNOTE_REFERENCE.sub(replace, piece)
+
+    pieces, last = [], 0
+    for code in INLINE_CODE.finditer(text):
+        pieces += [expand(text[last:code.start()]), code.group(0)]
+        last = code.end()
+    pieces.append(expand(text[last:]))
+    return "".join(pieces)
+
+
+def _list_items(children):
+    """入れ物の中の文を箇条書きの項目にまとめる。前の項目に続ける文（cont）は同じ項目へ足す。
+
+    和文は句読点のあとに空白を入れず、英文は空白で続ける。
+    """
+    items = []
+    for text, cont in children:
+        if cont and items:
+            items[-1] += ("" if items[-1][-1:] in "。．！？」）" else " ") + text
+        else:
+            items.append(text)
+    return items
+
+
+def _comment_lines(text, flavor):
+    """コメントのブロックを、媒体で読み手に見えない行にする。
+
+    LaTeX は行ごとに「%」を付ける（すでに「%」で始まる行はそのまま）。Markdown 系は HTML コメントで、行ごとに包むと、
+    本文の「-->」や複数行の字がコメントを途中で閉じて漏れるため、ブロック全体を1組の「<!-- … -->」で包む。
+    すでに全体が1つの正しい HTML コメントなら、二重に包まずそのまま返す。
+    flavor には、以前の呼び出しとの互換のため LaTeX かどうかの真偽値も受ける。
+    """
+    if flavor == "latex" or flavor is True:
+        lines = [line if line.lstrip().startswith("%") else (f"% {line}" if line.strip() else "%")
+                 for line in text.splitlines()]
+        return "\n".join(lines)
+    stripped = text.strip()
+    if not stripped:
+        return "<!-- -->"
+    if len(stripped) >= 7 and stripped.startswith("<!--") and stripped.endswith("-->") and "-->" not in stripped[4:-3]:
+        return stripped
+    # 中の「--」は HTML コメントを閉じうるので、ハイフンの連続の間に空白を入れる。「<!--」と「-->」の内側の空白は、
+    # 先頭の「>」や末尾の「-」が開きと閉じの記号とつながって「<!-->」「--->」になるのを防ぐ
+    safe = re.sub(r"-(?=-)", "- ", stripped)
+    return f"<!-- {safe} -->" if "\n" not in safe else f"<!--\n{safe}\n-->"
+
+
+def _next_opens_paragraph(root, order, position, starts):
+    """position 以降で、コメントと密着の記述を飛ばした次の要素が、段落を始める文か。文でない要素と末尾は、段落を始めない扱いにする。
+
+    設計書の無い記録でコメントを前の段落へ入れるか、次の段落の頭に置くかを決めるために使う。
+    """
+    for sid in order["order"][position:]:
+        if _is_inline_block(_latest(root, sid)):
+            continue
+        return sid.startswith("s") and starts[sid]
+    return False
+
+
+def _article(root, order, flavor="gfm", *, include_meta=True):
+    """付帯情報と文・ブロックを記事にして返す。脚注は本文の末尾にまとめる（LaTeX は本文の中の \\footnote に展開する）。アプリの本文コピーも同じ中身を使う。
+
+    flavor は書き出す媒体の方言（FLAVORS）。記録の形は媒体によらず同じで、注記の箱などの書き方が変わる。
+    gfm・qiita・zenn は Markdown、latex は LaTeX の本文（プリアンブルは含めない）を返す。
+    include_meta を偽にすると、付帯情報（frontmatter など）を付けずに本文だけを返す。全文と本文を同じ生成から取るため。
+    LaTeX で脚注の中から別の脚注を呼ぶ記録は書き出せないので ValueError にする。同じ脚注の2回の呼び出し、
+    裸の「%」、コードの中の「\\end{verbatim}」は、書き出しを止めずに標準エラーへ警告する。
     """
     if flavor not in FLAVORS:
         raise ValueError(f"方言は {'・'.join(FLAVORS)} のどれかにしてください: {flavor}")
     problems = _check_containers(root, order) + _check_footnotes(root, order)
     if problems:
         raise ValueError("\n".join(problems))
+    latex = flavor == "latex"
     starts = _paragraph_starts(root, order)
-    meta = _meta(root)
-    chunks = ["---\n" + meta.rstrip("\n") + "\n---"] if meta is not None else []
+    has_design = bool(_designs(root))
+    meta = _meta(root) if include_meta else None
+    if meta is None:
+        chunks = []
+    elif latex:
+        chunks = [meta.rstrip("\n")]
+    else:
+        chunks = ["---\n" + meta.rstrip("\n") + "\n---"]
+    bodies = _footnote_bodies(root, order) if latex else {}
+    for label, body in bodies.items():
+        # LaTeX の \footnote は標準では入れ子にできない。展開すると中の呼び出しが番号なしの字として残るか、組版が止まる
+        nested = FOOTNOTE_REFERENCE.findall(INLINE_CODE.sub("", body))
+        if nested:
+            raise ValueError(f"LaTeX 書き出しでは脚注の中から別の脚注を参照できません: [^{label}] の中に [^{nested[0]}] があります")
+    called = {}
+
+    def inline(text):
+        return _inline_footnotes(text, bodies, called) if latex else text
+
+    def warn_percent(sid, text):
+        if _BARE_PERCENT.search(text):
+            print(f"警告: {sid} にエスケープされていない % があります。LaTeX は % から行末までをコメントとして読み捨てます（\\% に直してください）", file=sys.stderr)
+
     footnotes = []
     plain = False
+    # 直前のチャンクが、段落の頭に置いたコメントで始まっているか。そのコメントと次の文は同じ段落のため、文が段落の始まりでも空行を挟まない
+    opened = False
+    # そのコメントの段落の番号。設計書があるとき、続く文の段落が違えばコメントは1つだけで1段落になり、文は次の段落を始める
+    opened_para = None
+    last_para = None
     position = 0
     while position < len(order["order"]):
         sid = order["order"][position]
         unit = _latest(root, sid)
         position += 1
         if sid.startswith("s"):
-            if not plain or starts[sid]:
-                chunks.append(unit["text"])
+            if latex:
+                warn_percent(sid, unit["text"])
+            leads = opened and not (has_design and unit.get("para") is not None and opened_para is not None
+                                    and unit["para"] != opened_para)
+            if not plain or (starts[sid] and not leads):
+                chunks.append(inline(unit["text"]))
             else:
                 # 同じ段落の文は1行に1文で続ける。Qiita・Zenn は段落の中の改行をそのまま改行として描くので、
                 # 記録の一文ずつの区切りが記事にも残る
-                chunks[-1] += "\n" + unit["text"]
-            plain = True
+                chunks[-1] += "\n" + inline(unit["text"])
+            plain, opened = True, False
+            last_para = unit.get("para")
             continue
         block, text = unit["block"], unit["text"]
         _validate_block(block, text)
         kind = block["kind"]
+        if kind == "comment":
+            # コメントは段落を切らない。設計書があれば段落の番号で、無ければ次の文が段落を始めるかで、前の段落に入れるか次の段落の頭に置くかを決める
+            # 段落の頭に置いたコメントが続くときは、後のコメントも同じチャンクに入れる
+            if has_design:
+                joins = plain and (opened or unit.get("para") is None or unit["para"] == last_para)
+            else:
+                joins = plain and (opened or not _next_opens_paragraph(root, order, position, starts))
+            if joins:
+                chunks[-1] += "\n" + _comment_lines(text, flavor)
+            else:
+                chunks.append(_comment_lines(text, flavor))
+                opened = True
+            if opened and unit.get("para") is not None:
+                opened_para = unit["para"]
+            plain = True
+            if unit.get("para") is not None:
+                last_para = unit["para"]
+            continue
+        if kind == "raw" and block.get("attach"):
+            # 見出しの \label のように、直前のチャンクへ密着させる。plain と opened は変えず、続く文の段落の扱いを保つ
+            if chunks:
+                chunks[-1] += "\n" + text.rstrip("\n")
+            else:
+                chunks.append(text.rstrip("\n"))
+            continue
         children = []
         if kind in CONTAINERS:
             while position < len(order["order"]):
@@ -1656,17 +2072,31 @@ def _article(root, order, flavor="gfm"):
                 child = _latest(root, child_id)
                 if child_id.startswith("b") or child.get("in") != sid:
                     break
-                children.append((child["text"], bool(child.get("cont"))))
+                if latex:
+                    warn_percent(child_id, child["text"])
+                children.append((inline(child["text"]), bool(child.get("cont"))))
                 position += 1
         if kind == "footnote":
-            # plain を保ったまま次へ進み、脚注の後ろの文が呼ぶ文と同じ段落に続くようにする
-            footnotes.append(f"[^{block['label']}]: " + "".join(text for text, _ in children))
+            # plain を保ったまま次へ進み、脚注の後ろの文が呼ぶ文と同じ段落に続くようにする。LaTeX は本文の中へ展開済みなので末尾に出さない
+            if not latex:
+                footnotes.append(f"[^{block['label']}]: " + "".join(text for text, _ in children))
             continue
         # 空の入れ物は履歴に残すが、読み手に内容の無い箱を見せないよう書き出しでは省く。
         if kind in CONTAINERS and not children:
             continue
-        plain = False
-        if kind == "heading":
+        plain = opened = False
+        if kind == "math":
+            chunks.append(_math_block(text, latex))
+        elif kind == "raw":
+            chunks.append(text.rstrip("\n"))
+        elif latex:
+            if kind == "heading":
+                warn_percent(sid, text)
+            elif kind == "code" and "\\end{verbatim}" in text:
+                print(f"警告: {sid} のコードに \\end{{verbatim}} が含まれています。LaTeX の verbatim がそこで閉じて、以降が組版で崩れます", file=sys.stderr)
+            # コードの中の [^ラベル] は呼び出しではないので展開しない
+            chunks.append(_latex_block(block, text if kind == "code" else inline(text), children))
+        elif kind == "heading":
             chunks.append("#" * block["level"] + " " + text)
         elif kind == "code":
             chunks.append(f"```{block['lang']}\n{text}\n```")
@@ -1680,19 +2110,62 @@ def _article(root, order, flavor="gfm"):
             else:
                 chunks.append("\n".join([opening, *(child for child, _ in children), ":::"]))
         elif kind == "list":
-            # 前の項目に続ける文（cont）は同じ行へ足す。和文は句読点のあとに空白を入れず、英文は空白で続ける
-            items = []
-            for text, cont in children:
-                if cont and items:
-                    items[-1] += ("" if items[-1][-1:] in "。．！？」）" else " ") + text
-                else:
-                    items.append(text)
-            chunks.append("\n".join(f"{number}. {text}" if block["ordered"] else f"- {text}"
-                                    for number, text in enumerate(items, 1)))
+            items = _list_items(children)
+            chunks.append("\n".join(f"{number}. {item}" if block["ordered"] else f"- {item}"
+                                    for number, item in enumerate(items, 1)))
         else:
-            chunks.append("\n".join(f"> {text}" for text, _ in children))
+            chunks.append("\n".join(f"> {child}" for child, _ in children))
     chunks.extend(footnotes)
+    for label, count in called.items():
+        if count > 1:
+            # 標準の LaTeX には、同じ脚注の番号を複数の箇所で共有する書き方が無い。\footnotemark は直前の脚注の番号しか指さない
+            print(f"警告: 脚注 [^{label}] を {count} 回呼んでいます。LaTeX では呼ぶたびに同じ中身の \\footnote を別の番号で出します", file=sys.stderr)
     return "\n\n".join(chunks) + ("\n" if chunks else "")
+
+
+def _math_block(text, latex):
+    """ディスプレイ数式のブロックを媒体の囲みで返す。すでに囲み（\\begin{…}・\\[・$$）で始まる記述はそのまま返す。"""
+    body = text.rstrip("\n")
+    opening = body.lstrip()
+    if latex:
+        return body if opening.startswith(("\\begin{", "\\[", "$$")) else f"\\[\n{body}\n\\]"
+    if opening.startswith("$$"):
+        return body
+    inner = _display_bracket_inner(body)
+    # 「\[…\]」の囲みのまま「$$」で包むと、囲みが二重になって Markdown の数式で崩れるため、外側を「$$」に差し替える
+    return f"$$\n{inner}\n$$" if inner else f"$$\n{body}\n$$"
+
+
+def _display_bracket_inner(body):
+    """全体が1組の「\\[…\\]」だけなら、その中身を返す。2組以上や囲みの外に字がある記述は None。"""
+    stripped = body.strip()
+    if not (stripped.startswith("\\[") and stripped.endswith("\\]")) or len(stripped) < 5:
+        return None
+    inner = stripped[2:-2]
+    return None if "\\[" in inner or "\\]" in inner else inner.strip() or None
+
+
+def _latex_block(block, text, children):
+    """LaTeX の方言で、見出し・コード・画像・表・入れ物のブロックを返す。画像と表は記録の本文をそのまま使う。"""
+    kind = block["kind"]
+    if kind == "heading":
+        return f"\\{LATEX_HEADINGS[block['level']]}{{{text}}}"
+    if kind == "code":
+        return f"\\begin{{verbatim}}\n{text}\n\\end{{verbatim}}"
+    if kind in ("image", "table"):
+        return text
+    if kind == "list":
+        environment = "enumerate" if block["ordered"] else "itemize"
+        # 項目が「[」で始まると、LaTeX は \item の任意引数と読む。空の組を挟んで本文として扱わせる
+        items = (f"\\item {{}}{item}" if item.startswith("[") else f"\\item {item}" for item in _list_items(children))
+        return "\n".join([f"\\begin{{{environment}}}", *items, f"\\end{{{environment}}}"])
+    if kind == "note":
+        # 外部パッケージに頼らず、引用の環境の先頭へ種類を太字で添える（コメントの行では組版に出ず、通常の引用と区別できない）
+        label = f"\\textbf{{{LATEX_NOTE_LABEL[block['type']]}:}}"
+        lines = [child for child, _ in children] or [""]
+        lines[0] = f"{label} {lines[0]}".rstrip()
+        return "\n".join(["\\begin{quote}", *lines, "\\end{quote}"])
+    return "\n".join(["\\begin{quote}", *(child for child, _ in children), "\\end{quote}"])
 
 
 CHECKLIST = Path(__file__).resolve().parent.parent / "references" / "checklist.md"
@@ -1873,8 +2346,8 @@ def _confirm(root, order, item, sids, text):
 
 
 def _export(root, order, flavor="gfm"):
-    """記事の Markdown を、媒体の方言で記録の text.md に書き出す。"""
-    _atomic_write(root / "text.md", _article(root, order, flavor))
+    """記事を、媒体の方言で記録に書き出す。LaTeX は text.tex、Markdown 系（gfm・qiita・zenn）は text.md に書く。"""
+    _atomic_write(root / ("text.tex" if flavor == "latex" else "text.md"), _article(root, order, flavor))
     # 書き出しは止めない（途中の確認のための書き出しもあるため）。残っている確認項目を知らせる
     try:
         left = [name for _source, name, _body, state, _detail in _checklist_rows(root, order) if state not in ("確認済み", "通過")]
@@ -2071,7 +2544,7 @@ def _parser():
             child.add_argument("--sids", required=True, help="確かめた文の ID をカンマ区切りで")
             child.add_argument("--text", required=True, help="何を確かめたか")
         if command == "export":
-            child.add_argument("--flavor", choices=FLAVORS, default="gfm", help="書き出す媒体の方言（既定は GitHub の Markdown）")
+            child.add_argument("--flavor", choices=FLAVORS, default="gfm", help="書き出す媒体の方言（既定は GitHub の Markdown。latex は text.tex に出す）")
     return parser
 
 
