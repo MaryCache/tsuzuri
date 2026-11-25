@@ -29,6 +29,8 @@ import urllib.parse
 import zipfile
 
 HERE = Path(__file__).resolve().parent
+# 一部の最小構成環境では .woff2 が application/octet-stream になり nosniff で弾かれるため、明示登録する
+mimetypes.add_type("font/woff2", ".woff2")
 sys.path.insert(0, str(HERE.parent / "skills" / "tsuzuri" / "scripts"))
 import tsuzuri as T  # noqa: E402  スキルのスクリプトを読み方の正本として使う
 
@@ -284,8 +286,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         # 他サイトの <img> や <script> から /api/image などを読み込ませない。応答の成否の差で画像の存在を探られるのを防ぐ
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
-        # 画面は自分の出どころの資源だけを読む。字形だけ Google Fonts から読む
-        self.send_header("Content-Security-Policy", csp or "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; script-src 'self'")
+        # 画面は自分の出どころの資源だけを読む（数式フォントも同梱の 'self' から読む）。本文書体だけ Google Fonts から読む
+        self.send_header("Content-Security-Policy", csp or "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; script-src 'self'")
         self.end_headers()
         self.wfile.write(data)
 

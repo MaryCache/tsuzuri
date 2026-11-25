@@ -129,3 +129,5 @@ details.more .body { padding: 6px 0 4px 24px; }
 .empty { color: var(--ink-sub); }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--side-bg); color: var(--side-ink); padding: 8px 16px; border-radius: 999px; font-size: var(--size-2); opacity: 0; pointer-events: none; transition: opacity var(--dur-base); }
 .toast.on { opacity: 1; }
+.blk-math-view { overflow-x: auto; overflow-y: hidden; padding: 8px 14px; }
+.blk-math-view .katex-display { margin: .2em 0; }

@@ -299,16 +299,58 @@ function renderDiffOnly() {
 }
 
 /**
- * 文の中の Markdown（太字・行内のコード・リンク・脚注の呼び出し）を描く。先に esc してから置き換えるので、文の中の HTML はそのまま字で出る。
+ * KaTeX が読み込まれていれば TeX 数式を組版 HTML へ変換する。未読み込み・長すぎる入力・未対応マクロのときは null を返し、
+ * 呼び出し側で生のコード表示や元の字へ戻す。共有ファイル（.tsz）からの XSS やリンク注入を防ぐため trust: false を固定する
+ */
+const MAX_MATH_LEN = 20000;
+function renderMath(tex, displayMode) {
+  const api = globalThis.katex;
+  if (!api || typeof api.renderToString !== "function") return null;
+  const src = String(tex ?? "").trim();
+  if (!src || src.length > MAX_MATH_LEN) return null;
+  let expr = src;
+  if (displayMode) {
+    if (expr.startsWith("$$") && expr.endsWith("$$") && expr.length > 4) expr = expr.slice(2, -2).trim();
+    else if (expr.startsWith("\\[") && expr.endsWith("\\]") && expr.length > 4) expr = expr.slice(2, -2).trim();
+    // プレビュー表示時だけ \label{...} を外す（KaTeX は \label 未対応だが、論文の equation / align では頻出するため）。記録と書き出しの原文は変えない
+    expr = expr.replace(/\\label\{[^{}]*\}/g, "").trim();
+  }
+  if (!expr) return null;
+  try {
+    return api.renderToString(expr, { displayMode, throwOnError: true, trust: false, strict: "ignore", maxExpand: 1000 });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 文の中の Markdown（太字・行内のコード・数式・リンク・脚注の呼び出し）を描く。先に esc してから置き換えるので、文の中の HTML はそのまま字で出る。
+ * コード片とインライン数式（$...$ / \(...\)）は先に退避して、中の記号（*・==・<）が Markdown やタグ補正に壊されないようにする。
  * 重要度は太さでなく「核だけを見る」ときの薄さで見せるので、太字と重ならない。
  * リンクは押しても移らない字にする。本文の文は押すと選ぶので、リンクで別の場所へ飛ぶと選ぶ操作とぶつかる
  */
 function mdInline(text) {
-  return balanceTags(obsidian(allowTags(esc(text)))
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
+  const raw = String(text ?? "");
+  let mark = "\uE000";
+  while (raw.includes(mark)) mark += "\uE000";
+  const slots = [];
+  const hold = html => { const idx = slots.push(html) - 1; return `${mark}${idx}${mark}`; };
+  // 1. コード片を先に退避する（`$x$` のようなコード中の $ を数式にしないため）
+  let masked = raw.replace(/`([^`]+)`/g, (_, inner) => hold(`<code>${esc(inner)}</code>`));
+  // 2. インライン数式 \(...\) と $...$ を退避する（\$・$$・前後の空白・直後が数字の通貨表記 $100 と $200 は除外する）
+  masked = masked.replace(/(^|[^\\])\\\(([^\n]+?)\\\)/g, (m, pre, inner) => {
+    const rendered = renderMath(inner, false);
+    return rendered ? `${pre}${hold(`<span class="md-math">${rendered}</span>`)}` : m;
+  });
+  masked = masked.replace(/(^|[^\\$])\$(?!\$)(?!\s)([^$\n]+?)(?<!\s)(?<!\\)\$(?![0-9$])/g, (m, pre, inner) => {
+    const rendered = renderMath(inner, false);
+    return rendered ? `${pre}${hold(`<span class="md-math">${rendered}</span>`)}` : m;
+  });
+  const html = balanceTags(obsidian(allowTags(esc(masked)))
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\[\^([^\]\s]+)\](?!:)/g, '<sup class="fn-ref">$1</sup>')
     .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<span class="md-link">$1</span>'));
+  return slots.length ? html.replace(new RegExp(`${mark}(\\d+)${mark}`, "g"), (_, i) => slots[Number(i)]) : html;
 }
 /**
  * 文の中の HTML のうち、決まった形のタグだけを効かせる（文字の色の span・斜体と太字・改行）。esc したあとの字から戻すので、
@@ -603,8 +645,13 @@ function renderText() {
         html += `<div ${attrs}>${mdTable(viewed(s).text)}</div>`;
       } else if (b.kind === "image" && (images = imageBlock(viewed(s).text))) {
         html += `<div ${attrs}><figure class="blk-img">${images}</figure></div>`;
-      } else if (b.kind === "math" || b.kind === "raw") {
-        const label = b.kind === "raw" && b.attach ? `${blockLabel(b)}（密着）` : blockLabel(b);
+      } else if (b.kind === "math") {
+        const rendered = renderMath(viewed(s).text, true);
+        html += rendered
+          ? `<div ${attrs}><span class="blk-label">${blockLabel(b)}</span><div class="blk-math-view">${rendered}</div></div>`
+          : `<div ${attrs}><span class="blk-label">${blockLabel(b)}</span><pre><code>${text}</code></pre></div>`;
+      } else if (b.kind === "raw") {
+        const label = b.attach ? `${blockLabel(b)}（密着）` : blockLabel(b);
         html += `<div ${attrs}><span class="blk-label">${label}</span><pre><code>${text}</code></pre></div>`;
       } else {
         html += `<div ${attrs}>${b.kind === "code" && b.lang ? `<span class="blk-label">${esc(b.lang)}</span>` : ""}<pre>${b.kind === "code" ? `<code>${text}</code>` : text}</pre></div>`;

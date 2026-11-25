@@ -96,6 +96,32 @@ const run = code => vm.runInContext(code, ctx);
   assert.match(rendered, /blk-math.*<span class="blk-label">数式<\/span><pre><code>E = mc\^2<\/code><\/pre>/);
   assert.match(rendered, /blk-raw.*<span class="blk-label">生の記述（密着）<\/span>/);
   assert.match(element('detail').innerHTML, /前の要素に密着/);
+
+  // 同梱 KaTeX を読み込んだ状態の数式プレビュー（ブロック数式・インライン数式・安全なフォールバック・XSS 拒否）
+  ctx.katex = require(path.join(__dirname, '../web/vendor/katex/katex.min.js'));
+  run(`renderText();`);
+  const withKatex = element('text').innerHTML;
+  assert.match(withKatex, /blk-math-view.*katex-display/);
+  // $$...$$・\[...\]・\label 付き equation を組版でき、未対応マクロや過大な入力は安全に生コードへ戻る
+  assert.match(run(`renderMath('$$\\\\frac{a}{b}$$', true)`), /katex-display/);
+  assert.match(run(`renderMath('\\\\[x^2 + y^2 = r^2\\\\]', true)`), /katex-display/);
+  assert.match(run(`renderMath('\\\\begin{equation}E=mc^2\\\\label{eq:e}\\\\end{equation}', true)`), /katex-display/);
+  assert.equal(run(`renderMath('\\\\unknownCustomMacro{1}', true)`), null);
+  assert.equal(run(`renderMath('x'.repeat(20001), true)`), null);
+  // trust: false により \href・\htmlClass・生 HTML からのリンクやスクリプト注入を許さない
+  const evilMath = run(`renderMath('\\\\href{javascript:alert(1)}{click}\\\\htmlClass{x}{y}', true)`);
+  if (evilMath !== null) {
+    assert.doesNotMatch(evilMath, /<a\b|href=|onclick=|<script/i);
+  }
+  const scriptMath = run(`renderMath('<script>alert(1)</script>', true)`);
+  if (scriptMath !== null) assert.doesNotMatch(scriptMath, /<script/i);
+  // インライン数式は $...$ と \(...\) を組版し、コード片・通貨表記・エスケープされた \$ は壊さない
+  assert.match(run(`mdInline('損失 $L(\\\\theta)$ と \\\\(E = mc^2\\\\) を示す')`), /md-math.*katex.*md-math.*katex/);
+  assert.equal(run(`mdInline('コード \`$x + y$\` はそのまま')`), 'コード <code>$x + y$</code> はそのまま');
+  assert.equal(run(`mdInline('価格は $100 と $200 です')`), '価格は $100 と $200 です');
+  assert.equal(run(`mdInline('エスケープ \\\\$x\\\\$ はそのまま')`), 'エスケープ \\$x\\$ はそのまま');
+  assert.match(run(`mdInline('<b>条件 $x < 1$ を満たす</b>')`), /^<b>条件 <span class="md-math">.*<\/span> を満たす<\/b>$/);
+  delete ctx.katex;
 }
 run(`
   const tags = { role: ['解説'], importance: '核', relation: '順接', technique: [], place: '依頼' };

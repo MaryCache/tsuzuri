@@ -904,6 +904,21 @@ class RecordsTest(unittest.TestCase):
         with request_url(base + "/api/doc") as response:
             self.assertEqual(len(json.load(response)["sentences"]), 6)
 
+    def test_katex_vendor_assets_and_csp(self):
+        """同梱の KaTeX 本体・CSS・woff2 フォントが配信され、CSP が 'self' のフォントを許す。"""
+        base = "http://127.0.0.1:18771"
+        with request_url(base + "/") as response:
+            self.assertIn("font-src 'self'", response.headers["Content-Security-Policy"])
+        with request_url(base + "/web/vendor/katex/katex.min.js") as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn("javascript", response.headers["Content-Type"])
+        with request_url(base + "/web/vendor/katex/katex.min.css") as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn("text/css", response.headers["Content-Type"])
+        with request_url(base + "/web/vendor/katex/fonts/KaTeX_Main-Regular.woff2") as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers["Content-Type"], "font/woff2")
+
 
 if __name__ == "__main__":
     unittest.main()
