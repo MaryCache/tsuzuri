@@ -100,6 +100,27 @@ class DocsTests(unittest.TestCase):
         for quoted in re.findall(r"「(\d\. [^」]+)」", vocab):
             self.assertIn(quoted.split(". ", 1)[1], names)
 
+    def test_skill_md_within_size_limits(self):
+        """SKILL.md は再添付上限（20,000字）と単発読み込み上限（46,080バイト）の両方を下回る。"""
+        text = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+        self.assertLess(len(text), 20_000, f"SKILL.md is {len(text)} chars")
+        size = len(text.encode("utf-8"))
+        self.assertLess(size, 46_080, f"SKILL.md is {size} bytes")
+
+    def test_markdown_relative_links_exist(self):
+        """配布文書の中の相対 Markdown リンクは、すべて存在するファイルを指している。"""
+        link_re = re.compile(r"\[[^\]]+\]\(([^)#:\s]+)\)")
+        found = 0
+        for path in DOCS:
+            for target in link_re.findall(path.read_text(encoding="utf-8")):
+                if target.startswith(("http://", "https://", "/")):
+                    continue
+                found += 1
+                with self.subTest(doc=path.name, target=target):
+                    resolved = (path.parent / target).resolve()
+                    self.assertTrue(resolved.is_file(), f"{path.name} -> {target}")
+        self.assertTrue(found)
+
 
 if __name__ == "__main__":
     unittest.main()
